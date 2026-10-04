@@ -53,6 +53,10 @@ tbody td { padding: 8px 10px; border-bottom: 1px solid var(--line); white-space:
 tbody tr:hover { background: rgba(127,127,127,.08); }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+h2.sect { font-size: 16px; font-weight: 600; margin: 8px 2px var(--gap); }
+.note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+.note.warn { color: var(--bad); }
+table.mini td, table.mini th { padding: 7px 8px; cursor: default; position: static; }
 footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
 @media (max-width: 768px) {
   header { flex-direction: column; align-items: flex-start; }
@@ -91,6 +95,16 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
     <div class="card"><h3>Body Battery</h3><div class="sub">Tageshöchst- und -tiefstwert</div><div class="chartbox"><canvas id="c-bb"></canvas></div></div>
     <div class="card"><h3>Trainingsumfang pro Woche</h3><div class="sub">Stunden nach Aktivitätstyp (Wochen ohne Aufzeichnung bleiben leer)</div><div class="chartbox"><canvas id="c-week"></canvas></div></div>
     <div class="card"><h3>Rad: Kilometer pro Woche</h3><div class="sub">Zusammengefasste Fahrten</div><div class="chartbox"><canvas id="c-ride"></canvas></div></div>
+  </section>
+
+  <h2 class="sect">Belastung &amp; Erholung</h2>
+  <section class="charts">
+    <div class="card"><h3>Trainingsbelastung pro Tag</h3><div class="sub">TRIMP aus Durchschnittspuls und Dauer. Linien: Ø Tageslast der letzten 7 bzw. 28 Tage. Zeiträume ohne Aufzeichnung bleiben leer</div><div class="chartbox"><canvas id="c-load"></canvas></div></div>
+    <div class="card"><h3>Akut-/Chronisch-Verhältnis (ACWR)</h3><div class="sub">7-Tage- zu 28-Tage-Last. Grüner Bereich 0,8–1,3 ist nur ein grober Richtwert</div><div class="chartbox"><canvas id="c-acwr"></canvas></div></div>
+    <div class="card"><h3>Ruhepuls gegen persönliche Baseline</h3><div class="sub">Band: Ø der 28 Vortage ± 1,5 Standardabweichungen, rote Punkte: deutlich erhöht</div><div class="chartbox"><canvas id="c-rhrbase"></canvas></div></div>
+    <div class="card"><h3>Erholungs-Signale pro Tag</h3><div class="sub">Zählt: Ruhepuls erhöht, Schlaf-Score niedrig, Body-Battery-Höchstwert niedrig (je gegen die eigene 28-Tage-Baseline)</div><div class="chartbox"><canvas id="c-flags"></canvas></div></div>
+    <div class="card" id="recovery-card"></div>
+    <div class="card" id="zones-card"></div>
   </section>
 
   <section class="card tablecard">
@@ -178,11 +192,12 @@ function renderKPIs(daily) {
   const { from, to, prev } = range();
   const cur = kpiValues(daily, from, to), old = prev ? kpiValues(daily, prev[0], prev[1]) : null;
   // Uhr vermutlich nicht getragen: Nacht fehlt oder < 5 h (unabhängig vom Filter "ausblenden")
-  const offDays = prev ? DAILY.filter(r => inRange(tOf(r.date), prev[0], prev[1]) && (r.sleep_h == null || r.sleep_h < MIN_SLEEP_H)).length : 0;
-  const prevGappy = prev && offDays / ((prev[1] - prev[0]) / DAY + 1) > 0.25;
+  const gappy = (a, b) => DAILY.filter(r => inRange(tOf(r.date), a, b) && (r.unrecorded || r.sleep_h == null || r.sleep_h < MIN_SLEEP_H)).length / ((b - a) / DAY + 1) > 0.25;
+  const prevGappy = prev && (gappy(prev[0], prev[1]) || gappy(from, to));
+  const extra = extraKpis(daily, from, to);
   document.getElementById("kpis").innerHTML = KPI_DEFS.map(d => {
     let delta = "", cls = "";
-    if (prevGappy) delta = "Vorzeitraum lückenhaft";
+    if (prevGappy) delta = "Zeitraum lückenhaft, kein Vergleich";
     else if (old && cur[d.k] != null && old[d.k] != null && old[d.k] !== 0) {
       const diff = cur[d.k] - old[d.k];
       const txt = d.mode === "pct" ? (diff / old[d.k] * 100) : diff;
@@ -191,7 +206,20 @@ function renderKPIs(daily) {
       if (d.good !== 0 && Math.abs(diff) > 1e-9) cls = (diff * d.good > 0) ? "good" : "bad";
     }
     return `<div class="kpi"><div class="l">${d.l}</div><div class="v">${d.f(cur[d.k])}<small>${d.unit}</small></div><div class="d ${cls}">${delta}</div></div>`;
-  }).join("");
+  }).join("") + extra;
+}
+function extraKpis(daily, from, to) {
+  const P = META.profile, d = daily.filter(r => inRange(r.t, from, to));
+  const lastAcwr = [...d].reverse().find(r => r.acwr != null);
+  const a = lastAcwr ? lastAcwr.acwr : null;
+  const band = a == null ? "" : a < 0.8 ? "niedrig (Untertraining)" : a <= 1.3 ? "ausgewogen" : a <= 1.5 ? "erhöht" : "hoch";
+  const bcls = a == null ? "" : (a > 1.5 ? "bad" : a >= 0.8 && a <= 1.3 ? "good" : "");
+  const warn = d.filter(r => r.flags >= 2).length;
+  const warn14 = daily.filter(r => inRange(r.t, maxT - 13 * DAY, maxT) && r.flags >= 2).length;
+  const share = P.n_hr_sessions ? P.n_exceed / P.n_hr_sessions : 0;
+  return `<div class="kpi"><div class="l">ACWR aktuell</div><div class="v">${nf(a, 2)}</div><div class="d ${bcls}">${band}</div></div>` +
+    `<div class="kpi"><div class="l">Tage mit ≥ 2 Warn-Signalen</div><div class="v">${warn}</div><div class="d ${warn14 >= 3 ? "bad" : ""}">${warn14} in den letzten 14 Tagen</div></div>` +
+    `<div class="kpi"><div class="l">HFmax (Zonen-Basis)</div><div class="v">${P.hrmax}<small>bpm</small></div><div class="d ${share > 0.15 ? "bad" : ""}">${P.hrmax_source}${share > 0.15 ? " · zu niedrig?" : ""}</div></div>`;
 }
 
 // ---- Charts --------------------------------------------------------------------
@@ -235,6 +263,34 @@ function makeCharts() {
       y: { stacked: true, grid: { color: css("--grid") }, title: { display: true, text: "h" } } },
       plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 1)} h` } } } }) });
+  const gridX = (st) => ({ stacked: st, grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0 } });
+  const noLegend = hide => ({ legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8, filter: i => !hide.includes(i.text) } } });
+  mk("c-load", { data: { labels: [], datasets: [
+      { type: "bar", label: "Gemessen (Puls)", data: [], backgroundColor: "#CC79A7", stack: "load", order: 3 },
+      { type: "bar", label: "Geschätzt (Pendeln)", data: [], backgroundColor: "#9CC3E0", stack: "load", order: 3 },
+      { type: "line", label: "Akut (7 Tage Ø)", data: [], borderColor: "#D55E00", borderWidth: 2.5, pointRadius: 0, tension: .25, stack: "acute", order: 1 },
+      { type: "line", label: "Chronisch (28 Tage Ø)", data: [], borderColor: "#1F4E79", borderWidth: 2.5, pointRadius: 0, tension: .25, stack: "chronic", order: 2 }] },
+    options: baseOpts({ scales: { x: gridX(true), y: { stacked: true, grid: { color: css("--grid") }, title: { display: true, text: "TRIMP / Tag" } } },
+      plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 0)}` } } } }) });
+  mk("c-acwr", { type: "line", data: { labels: [], datasets: [
+      { label: "Untergrenze 0,8", data: [], borderWidth: 0, pointRadius: 0 },
+      { label: "Richtbereich 0,8–1,3", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#009E7335", fill: "-1" },
+      { label: "ACWR", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25 }] },
+    options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze 0,8"]), { tooltip: { filter: i => i.dataset.label === "ACWR", callbacks: { label: c => `ACWR: ${nf(c.parsed.y, 2)}` } } }),
+      scales: { x: gridX(false), y: { min: 0, grid: { color: css("--grid") } } } }) });
+  mk("c-rhrbase", { type: "line", data: { labels: [], datasets: [
+      { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0 },
+      { label: "Normalbereich (28 Tage ± 1,5 SD)", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#99999933", fill: "-1" },
+      { label: "Baseline", data: [], borderColor: "#888", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0 },
+      { label: "Ruhepuls", data: [], showLine: false, borderColor: "#E69F00", backgroundColor: "#E69F00", pointRadius: 3.5 }] },
+    options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze"]), { tooltip: { filter: i => ["Ruhepuls", "Baseline"].includes(i.dataset.label), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 1)} bpm` } } }),
+      scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "bpm" } } } }) });
+  mk("c-flags", { type: "bar", data: { labels: [], datasets: [{ label: "Signale", data: [], backgroundColor: [] }] },
+    options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: {
+        label: c => { const r = flagRows[c.dataIndex]; const s = [r.sig_rhr && "Ruhepuls erhöht", r.sig_sleep && "Schlaf-Score niedrig", r.sig_bb && "Body Battery niedrig"].filter(Boolean);
+          return s.length ? s : "keine Signale"; } } } },
+      scales: { x: gridX(false), y: { min: 0, max: 3, ticks: { stepSize: 1, precision: 0 }, grid: { color: css("--grid") } } } }) });
   mk("c-ride", { type: "bar", data: { labels: [], datasets: [{ label: "km", data: [], backgroundColor: GROUP_COLORS["Rad"] }] },
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${nf(c.parsed.y, 1)} km` } } },
       scales: { x: { grid: { display: false }, ticks: { maxRotation: 0 } },
@@ -245,6 +301,43 @@ function setData(id, labels, sets) {
   sets.forEach((d, i) => c.data.datasets[i].data = d);
   c.update("none");
 }
+let flagRows = [];
+const FLAG_COLORS = ["#00000000", "#E69F00", "#D55E00", "#B3261E"];
+function updateLoadCharts(d, L) {
+  const un = r => r.unrecorded ? null : undefined;
+  setData("c-load", L, [d.map(r => r.load_meas), d.map(r => r.load_est), d.map(r => r.acute_d), d.map(r => r.chronic_d)]);
+  setData("c-acwr", L, [d.map(() => 0.8), d.map(() => 1.3), d.map(r => r.acwr)]);
+  const rh = r => (r.resting_hr != null && r.resting_hr >= 45) ? r.resting_hr : null;
+  setData("c-rhrbase", L, [d.map(r => r.rhr_lo), d.map(r => r.rhr_hi), d.map(r => r.rhr_base), d.map(rh)]);
+  const c = charts["c-rhrbase"]; c.data.datasets[3].pointBackgroundColor = d.map(r => r.sig_rhr ? "#B3261E" : "#E69F00");
+  c.data.datasets[3].pointRadius = d.map(r => r.sig_rhr ? 5 : 3); c.update("none");
+  flagRows = d;
+  const f = charts["c-flags"]; f.data.datasets[0].backgroundColor = d.map(r => FLAG_COLORS[r.flags] || FLAG_COLORS[3]);
+  setData("c-flags", L, [d.map(r => r.flags)]);
+}
+function renderRecovery() {
+  const fmtP = p => p < 0.001 ? "&lt; 0,001" : nf(p, 3);
+  const dec = m => m.includes("Tiefschlaf") ? 2 : (m.includes("Ruhepuls") ? 1 : 0);
+  const rows = RECOVERY.map(r => `<tr><td>${r.metric}</td><td class="num">${nf(r.hiit, dec(r.metric))}</td><td class="num">${nf(r.other, dec(r.metric))}</td>` +
+    `<td class="num">${r.diff > 0 ? "+" : ""}${nf(r.diff, dec(r.metric))}</td><td class="num">${fmtP(r.p)}</td></tr>`).join("");
+  document.getElementById("recovery-card").innerHTML = `<h3>Erholung nach HIIT-Tagen</h3>
+    <div class="sub">Werte am Morgen nach einem HIIT-Tag im Vergleich zu allen anderen Tagen (gesamte Datenbasis)</div>
+    <table class="mini"><thead><tr><th>Kennwert</th><th>Nach HIIT</th><th>Sonst</th><th>Diff.</th><th>p</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="note">p: Permutationstest. Ein Zusammenhang, kein Beweis: HIIT liegt meist am frühen Abend und oft auf Montagen; ${RECOVERY[0].n_hiit} HIIT- gegen ${RECOVERY[0].n_other} andere Tage. Zeiträume ohne Aufzeichnung und Nächte unter ${MIN_SLEEP_H} h sind ausgeschlossen.</div>`;
+}
+function renderZones() {
+  const P = META.profile, { from, to } = range();
+  const s = ACTS.filter(a => inRange(actT(a), from, to) && a.zone);
+  const cnt = z => s.filter(a => a.zone === z).length;
+  const rows = P.zones.map(z => `<tr><td>${z.zone}</td><td class="num">${z.lo}–${z.hi}</td><td class="num">${cnt(z.zone)}</td></tr>`).join("");
+  const below = cnt("<Z1");
+  const share = P.n_hr_sessions ? Math.round(P.n_exceed / P.n_hr_sessions * 100) : 0;
+  document.getElementById("zones-card").innerHTML = `<h3>Herzfrequenz-Zonen</h3>
+    <div class="sub">Karvonen (Herzfrequenzreserve): Alter ${P.age}, Ruhe-HF ${P.rhr_ref} bpm, HFmax ${P.hrmax} bpm (${P.hrmax_source}). Einheiten nach Durchschnittspuls</div>
+    <table class="mini"><thead><tr><th>Zone</th><th>bpm</th><th>Einheiten im Zeitraum</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="note">${below ? below + " Einheiten unter Zone 1. " : ""}Zonen basieren auf dem Durchschnittspuls je Einheit, nicht auf der Zeit in Zonen.</div>
+    <div class="note ${share > 15 ? "warn" : ""}">${P.n_exceed} von ${P.n_hr_sessions} Einheiten (${share} %) hatten einen Spitzenpuls über dem HFmax-Wert.${share > 15 ? " Die HFmax-Schätzung ist vermutlich zu niedrig oder der Handgelenk-Sensor liefert Ausreißer: HFmax per Belastungstest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen." : ""}</div>`;
+}
 function updateCharts(daily) {
   const { from, to } = range();
   const d = daily.filter(r => inRange(r.t, from, to));
@@ -253,6 +346,7 @@ function updateCharts(daily) {
   setData("c-rhr", L, [d.map(r => r.resting_hr), d.map(r => r.rhr_7d)]);
   setData("c-sleep", L, [d.map(r => r.deep_h), d.map(r => r.light_h), d.map(r => r.rem_h), d.map(r => r.awake_h)]);
   setData("c-bb", L, [d.map(r => r.bb_low), d.map(r => r.bb_high)]);
+  updateLoadCharts(d, L);
 
   // Wochen (Mo-So), lückenlos vom Zeitraumanfang bis heute
   const firstT = d.length ? d[0].t : maxT;
@@ -281,6 +375,8 @@ const COLS = [
   { f: "kcal", l: "kcal", num: 1, d: 0 },
   { f: "te_aerobic", l: "TE aerob", num: 1, d: 1 },
   { f: "te_anaerobic", l: "TE anaerob", num: 1, d: 1 },
+  { f: "zone", l: "Zone" },
+  { f: "trimp", l: "TRIMP", num: 1, d: 0, fmtRow: r => r.trimp == null ? "–" : (r.est ? "~" : "") + nf(r.trimp, 0) },
 ];
 function renderTable() {
   const { from, to } = range();
@@ -296,7 +392,7 @@ function renderTable() {
   const head = COLS.map(c => `<th data-f="${c.f}">${c.l}${state.sortField === c.f ? (state.sortDir === "asc" ? " ▲" : " ▼") : ""}</th>`).join("");
   const body = rows.map(r => "<tr>" + COLS.map(c => {
     const v = r[c.f];
-    const t = c.num ? nf(v, c.d) : (v == null ? "–" : (c.fmt ? c.fmt(v) : String(v).replace(/[<>&]/g, ch => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[ch]))));
+    const t = c.fmtRow ? c.fmtRow(r) : c.num ? nf(v, c.d) : (v == null ? "–" : (c.fmt ? c.fmt(v) : String(v).replace(/[<>&]/g, ch => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[ch]))));
     return `<td class="${c.num ? "num" : ""}">${t}</td>`;
   }).join("") + "</tr>").join("");
   const tbl = document.getElementById("tbl");
@@ -312,7 +408,7 @@ function renderTable() {
 // ---- Steuerung -----------------------------------------------------------------
 function refresh() {
   const daily = prepDaily();
-  renderKPIs(daily); updateCharts(daily); renderTable();
+  renderKPIs(daily); updateCharts(daily); renderTable(); renderRecovery(); renderZones();
 }
 function init() {
   const groups = [...new Set(ACTS.map(a => a.group))].sort();
