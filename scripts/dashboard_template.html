@@ -394,7 +394,7 @@ function renderZones() {
     note1 = "Zonen nach Karvonen aus Durchschnittspuls je Einheit (Zeit in Zonen nicht verfügbar).";
   }
   const share = P.n_hr_sessions ? Math.round(P.n_exceed / P.n_hr_sessions * 100) : 0;
-  const diff = G ? ` Eigene Schätzung: ${P.hrmax} bpm (${P.hrmax_source}); Garmin nutzt ${G.hrmax} bpm.` : "";
+  const diff = G ? ` Dein HFmax-Wert: ${P.hrmax} bpm (${P.hrmax_source}); Garmin nutzt ${G.hrmax} bpm.` : "";
   document.getElementById("zones-card").innerHTML = `<h3>Herzfrequenz-Zonen</h3>
     <div class="sub">Alter ${P.age}, Ruhe-HF ${P.rhr_ref} bpm. ${G ? "Minuten im ausgewählten Zeitraum" : "Einheiten im Zeitraum"}</div>
     <table class="mini"><thead><tr><th>Zone</th><th>bpm</th><th>${G ? "Minuten" : "Einheiten"}</th><th>Anteil</th></tr></thead><tbody>${rows}</tbody></table>
