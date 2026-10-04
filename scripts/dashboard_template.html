@@ -329,7 +329,7 @@ function makeCharts() {
       { label: "Einschlafen", data: [], borderColor: "#34495E", backgroundColor: "#34495E", pointRadius: 2.5, borderWidth: 1.5, tension: .2 },
       { label: "Aufwachen", data: [], borderColor: "#E69F00", backgroundColor: "#E69F00", pointRadius: 2.5, borderWidth: 1.5, tension: .2 }] },
     options: baseOpts({ plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${hhmm(c.parsed.y)}` } } },
-      scales: { x: gridX(false), y: { grid: { color: css("--grid") }, ticks: { callback: v => hhmm(v) } } } }) });
+      scales: { x: gridX(false), y: { min: 4, max: 28, grid: { color: css("--grid") }, ticks: { stepSize: 4, callback: v => hhmm(v) } } } }) });
   mk("c-vitals", { data: { labels: [], datasets: [
       { type: "bar", label: "Hauttemperatur-Abweichung (°C)", data: [], backgroundColor: "#D55E00AA", yAxisID: "y", order: 2 },
       { type: "line", label: "SpO₂ Ø (%)", data: [], borderColor: "#0072B2", borderWidth: 1.5, pointRadius: 0, yAxisID: "y2", order: 1 },
@@ -378,7 +378,7 @@ function renderRecovery() {
   document.getElementById("recovery-card").innerHTML = `<h3>Erholung nach HIIT-Tagen</h3>
     <div class="sub">Werte am Morgen nach einem HIIT-Tag im Vergleich zu allen anderen Tagen (gesamte Datenbasis)</div>
     <table class="mini"><thead><tr><th>Kennwert</th><th>Nach HIIT</th><th>Sonst</th><th>Diff.</th><th>p</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="note">p: Permutationstest. Ein Zusammenhang, kein Beweis: HIIT liegt meist am frühen Abend und oft auf Montagen; ${RECOVERY[0].n_hiit} HIIT- gegen ${RECOVERY[0].n_other} andere Tage. Zeiträume ohne Aufzeichnung und Nächte unter ${MIN_SLEEP_H} h sind ausgeschlossen.</div>`;
+    <div class="note">p: Permutationstest. Ein Zusammenhang, kein Beweis: HIIT liegt meist am frühen Abend und oft auf Montagen; ${RECOVERY[0].n_hiit} HIIT- gegen ${RECOVERY[0].n_other} andere Tage. Zeiträume ohne Aufzeichnung und Nächte unter ${MIN_SLEEP_H} h sind ausgeschlossen. Die Training Readiness enthält Garmins eigene Last und Erholungszeit und ist daher nicht unabhängig vom Training.</div>`;
 }
 function renderZones() {
   const P = META.profile, G = META.garmin_zones, { from, to } = range();
