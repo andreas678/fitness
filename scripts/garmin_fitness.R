@@ -23,6 +23,8 @@
 # Ausgabe:
 #   data/garmin_daily.csv        Tageswerte (Schritte, Ruhepuls, Schlaf, Body Battery …)
 #   data/garmin_activities.csv   Einzelne Aktivitäten
+#   data/garmin_activity_zones.csv  Zeit in Herzfrequenzzonen je Aktivität (nur mit Pulsdaten)
+#   data/garmin_weight.csv       Wiegungen (Gewicht, BMI, falls vorhanden Körperfett)
 #   _outputs/*.png               Einzelgrafiken + fitness_dashboard.png
 # =============================================================================
 
@@ -67,6 +69,8 @@ dir.create(DIR_OUT,  showWarnings = FALSE, recursive = TRUE)
 
 F_DAILY <- file.path(DIR_DATA, "garmin_daily.csv")
 F_ACT   <- file.path(DIR_DATA, "garmin_activities.csv")
+F_WEIGHT <- file.path(DIR_DATA, "garmin_weight.csv")
+F_ZONES  <- file.path(DIR_DATA, "garmin_activity_zones.csv")
 PREFIX  <- if (DEMO) "demo_" else ""
 
 GROUP_COLORS <- c(
@@ -143,11 +147,12 @@ garmin_login <- function() {
   api
 }
 
-# Ein Tag: Tagesstatistik + Schlaf -> eine Zeile
+# Ein Tag: Tagesstatistik (R) + Schlaf, HRV, Readiness, Trainingsstatus (Python) -> eine Zeile
 fetch_day <- function(api, d) {
   d  <- as.character(d)
-  st <- tryCatch(api$get_stats(d),      error = function(e) NULL)
-  sl <- tryCatch(api$get_sleep_data(d), error = function(e) NULL)
+  st <- tryCatch(api$get_stats(d), error = function(e) NULL)
+  ex <- tryCatch(extra_day(api, d), error = function(e) list())
+  ev <- function(k) { v <- ex[[k]]; if (is.null(v)) NA else v }
   tibble(
     date          = as.Date(d),
     steps         = num(pick(st, "totalSteps")),
@@ -161,18 +166,28 @@ fetch_day <- function(api, d) {
     stress_avg    = num(pick(st, "averageStressLevel")),
     bb_high       = num(pick(st, "bodyBatteryHighestValue")),
     bb_low        = num(pick(st, "bodyBatteryLowestValue")),
-    sleep_h       = num(pick(sl, "dailySleepDTO", "sleepTimeSeconds")) / 3600,
-    deep_h        = num(pick(sl, "dailySleepDTO", "deepSleepSeconds")) / 3600,
-    light_h       = num(pick(sl, "dailySleepDTO", "lightSleepSeconds")) / 3600,
-    rem_h         = num(pick(sl, "dailySleepDTO", "remSleepSeconds")) / 3600,
-    awake_h       = num(pick(sl, "dailySleepDTO", "awakeSleepSeconds")) / 3600,
-    sleep_score   = num(pick(sl, "dailySleepDTO", "sleepScores", "overall", "value"))
+    sleep_h       = num(ev("sleep_h")),  deep_h  = num(ev("deep_h")),
+    light_h       = num(ev("light_h")),  rem_h   = num(ev("rem_h")),
+    awake_h       = num(ev("awake_h")),  sleep_score = num(ev("sleep_score")),
+    sleep_start   = as.character(ev("sleep_start")), sleep_end = as.character(ev("sleep_end")),
+    sleep_need_min = num(ev("sleep_need_min")), sleep_hr = num(ev("sleep_hr")),
+    sleep_stress  = num(ev("sleep_stress")), awake_count = num(ev("awake_count")),
+    restless      = num(ev("restless")), spo2_avg = num(ev("spo2_avg")), spo2_low = num(ev("spo2_low")),
+    resp_sleep    = num(ev("resp_sleep")), skin_temp_dev = num(ev("skin_temp_dev")),
+    bb_sleep_change = num(ev("bb_sleep_change")),
+    hrv_night     = num(ev("hrv_night")), hrv_weekly = num(ev("hrv_weekly")),
+    hrv_5min_high = num(ev("hrv_5min_high")), hrv_base_low = num(ev("hrv_base_low")),
+    hrv_base_high = num(ev("hrv_base_high")), hrv_status = as.character(ev("hrv_status")),
+    ready_score   = num(ev("ready_score")), ready_level = as.character(ev("ready_level")),
+    recovery_h    = num(ev("recovery_h")), ts_acute = num(ev("ts_acute")),
+    ts_chronic    = num(ev("ts_chronic")), ts_acwr = num(ev("ts_acwr")),
+    ts_status     = as.character(ev("ts_status")), vo2max = num(ev("vo2max"))
   )
 }
 
 # reticulate wandelt Python-Ints in R-Integer um und läuft dabei über (IDs > 2^31).
-# Caches aus der Zeit davor haben falsche IDs: einmalig mit --refresh neu aufbauen.
 # Deshalb wird activityId in Python zum String gemacht, bevor die Daten nach R gehen.
+# (Caches aus der Zeit davor haben falsche IDs: einmalig mit --refresh neu aufbauen.)
 py_fetch_activities <- function(api, start, end) {
   reticulate::py_run_string(paste(
     "def fetch_activities(api, start, end):",
@@ -216,6 +231,11 @@ read_act_cache <- function() {
 # Tageswerte inkrementell nachladen (heute und gestern immer neu, da unvollständig)
 update_daily <- function(api) {
   old  <- if (REFRESH) NULL else read_daily_cache()
+  # Cache aus der Zeit vor den HRV-/Readiness-Feldern: einmal komplett neu laden
+  if (!is.null(old) && !all(c("hrv_night", "ready_score", "sleep_start") %in% names(old))) {
+    message("Daily-Cache hat neue Spalten nicht (HRV, Readiness, Schlafzeiten): lade alles neu.")
+    old <- NULL
+  }
   want <- seq(Sys.Date() - DAYS_BACK, Sys.Date(), by = "day")
   have <- if (is.null(old)) as.Date(character()) else old$date[!is.na(old$steps)]
   todo <- want[!(want %in% have) | want >= Sys.Date() - 1]
@@ -225,7 +245,7 @@ update_daily <- function(api) {
   for (i in seq_along(todo)) {
     rows[[i]] <- fetch_day(api, todo[i])
     if (i %% 10 == 0) message(sprintf("  %d/%d", i, length(todo)))
-    Sys.sleep(0.4)   # Garmin nicht fluten
+    Sys.sleep(0.5)   # Garmin nicht fluten (5 API-Aufrufe je Tag)
   }
   new <- bind_rows(rows)
   out <- bind_rows(if (!is.null(old)) filter(old, !date %in% new$date), new) |>
@@ -245,6 +265,43 @@ update_activities <- function(api) {
                    new) |>
     arrange(start)
   write_csv(out, F_ACT)
+  out
+}
+
+# Wiegungen: Zeitraum komplett holen, per Datum mit Cache zusammenführen
+update_weight <- function(api) {
+  old <- if (!REFRESH && file.exists(F_WEIGHT)) read_csv(F_WEIGHT, show_col_types = FALSE) else NULL
+  raw <- fetch_weights(api, as.character(Sys.Date() - DAYS_BACK), as.character(Sys.Date()))
+  new <- if (length(raw) > 0)
+    bind_rows(lapply(raw, function(w) {
+      nz <- function(x) if (is.null(x)) NA_real_ else num(x)   # fehlende Felder = NA
+      tibble(date = as.Date(w$date), weight_kg = nz(w$weight_kg), bmi = nz(w$bmi),
+             body_fat = nz(w$body_fat), muscle_kg = nz(w$muscle_kg))
+    })) else NULL
+  message(sprintf("Wiegungen: %d im Zeitraum.", if (is.null(new)) 0L else nrow(new)))
+  out <- bind_rows(if (!is.null(old) && !is.null(new)) filter(old, !date %in% new$date) else old, new) |>
+    arrange(date)
+  write_csv(out, F_WEIGHT)
+  out
+}
+
+# Zeit in Herzfrequenzzonen: je Aktivität mit Pulsdaten einmal holen und cachen
+update_zones <- function(api, acts) {
+  old <- if (!REFRESH && file.exists(F_ZONES))
+    read_csv(F_ZONES, show_col_types = FALSE, col_types = cols(activity_id = col_character(), .default = col_double())) else NULL
+  ids <- acts$activity_id[!is.na(acts$avg_hr)]
+  todo <- setdiff(ids, if (is.null(old)) character() else old$activity_id)
+  message(sprintf("Herzfrequenzzonen: %d Aktivitäten nachladen …", length(todo)))
+  rows <- vector("list", length(todo))
+  for (i in seq_along(todo)) {
+    z <- tryCatch(fetch_zones(api, todo[i]), error = function(e) NULL)
+    if (!is.null(z)) rows[[i]] <- as_tibble(c(list(activity_id = todo[i]),
+                                              lapply(z, function(v) if (is.null(v)) NA_real_ else num(v))))
+    if (i %% 25 == 0) message(sprintf("  %d/%d", i, length(todo)))
+    Sys.sleep(0.3)
+  }
+  out <- bind_rows(old, bind_rows(rows))
+  if (!is.null(out) && nrow(out) > 0) write_csv(out, F_ZONES)
   out
 }
 
@@ -295,8 +352,11 @@ if (DEMO) {
     NULL
   })
   if (!is.null(api)) {
+    reticulate::source_python(here("scripts", "garmin_extra.py"))   # extra_day() u. a.
     daily <- update_daily(api)
     acts  <- update_activities(api)
+    invisible(update_weight(api))
+    invisible(update_zones(api, acts))
   } else {
     daily <- read_daily_cache(); acts <- read_act_cache()
   }

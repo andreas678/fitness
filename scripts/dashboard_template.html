@@ -102,9 +102,18 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
     <div class="card"><h3>Trainingsbelastung pro Tag</h3><div class="sub">TRIMP aus Durchschnittspuls und Dauer. Linien: Ø Tageslast der letzten 7 bzw. 28 Tage. Zeiträume ohne Aufzeichnung bleiben leer</div><div class="chartbox"><canvas id="c-load"></canvas></div></div>
     <div class="card"><h3>Akut-/Chronisch-Verhältnis (ACWR)</h3><div class="sub">7-Tage- zu 28-Tage-Last. Grüner Bereich 0,8–1,3 ist nur ein grober Richtwert</div><div class="chartbox"><canvas id="c-acwr"></canvas></div></div>
     <div class="card"><h3>Ruhepuls gegen persönliche Baseline</h3><div class="sub">Band: Ø der 28 Vortage ± 1,5 Standardabweichungen, rote Punkte: deutlich erhöht</div><div class="chartbox"><canvas id="c-rhrbase"></canvas></div></div>
-    <div class="card"><h3>Erholungs-Signale pro Tag</h3><div class="sub">Zählt: Ruhepuls erhöht, Schlaf-Score niedrig, Body-Battery-Höchstwert niedrig (je gegen die eigene 28-Tage-Baseline)</div><div class="chartbox"><canvas id="c-flags"></canvas></div></div>
+    <div class="card"><h3>Erholungs-Signale pro Tag</h3><div class="sub">Zählt: Ruhepuls erhöht, Schlaf-Score niedrig, Body-Battery-Höchstwert niedrig, HRV niedrig (je gegen die eigene 28-Tage-Baseline)</div><div class="chartbox"><canvas id="c-flags"></canvas></div></div>
     <div class="card" id="recovery-card"></div>
     <div class="card" id="zones-card"></div>
+  </section>
+
+  <h2 class="sect">HRV, Schlaf &amp; Vitalwerte</h2>
+  <section class="charts">
+    <div class="card"><h3>Herzratenvariabilität (HRV) nachts</h3><div class="sub">Punkte: Nachtmittel, Linie: 7-Tage-Mittel, Band: Garmin-Normalbereich (balanced)</div><div class="chartbox"><canvas id="c-hrv"></canvas></div></div>
+    <div class="card"><h3>Training Readiness (Morgenwert)</h3><div class="sub">Garmin-Score 0–100: unter 25 schlecht, 25–49 niedrig, 50–74 mittel, ab 75 hoch</div><div class="chartbox"><canvas id="c-ready"></canvas></div></div>
+    <div class="card"><h3>Schlafenszeit und Aufwachzeit</h3><div class="sub">Uhrzeit des Einschlafens und Aufwachens</div><div class="chartbox"><canvas id="c-sleeptime"></canvas></div></div>
+    <div class="card"><h3>Nächtliche Vitalwerte</h3><div class="sub">Balken: Hauttemperatur-Abweichung vom persönlichen Mittel (°C). Linien: SpO₂ im Schlaf (%)</div><div class="chartbox"><canvas id="c-vitals"></canvas></div></div>
+    <div class="card"><h3>Körpergewicht</h3><div class="sub">Wiegungen aus Garmin Connect</div><div class="chartbox"><canvas id="c-weight"></canvas></div></div>
   </section>
 
   <section class="card tablecard">
@@ -146,15 +155,16 @@ function prepDaily() {
   const rows = DAILY.map(r => {
     const x = { ...r, t: tOf(r.date) };
     if (state.hideBad && x.sleep_h != null && x.sleep_h < MIN_SLEEP_H)
-      ["sleep_h", "deep_h", "light_h", "rem_h", "awake_h", "sleep_score"].forEach(k => x[k] = null);
+      ["sleep_h", "deep_h", "light_h", "rem_h", "awake_h", "sleep_score", "hrv_night", "sleep_hr", "spo2_avg", "spo2_low",
+       "resp_sleep", "skin_temp_dev", "bed_h", "wake_h"].forEach(k => x[k] = null);
     return x;
   }).sort((a, b) => a.t - b.t);
   const roll = k => rows.map((_, i) => {           // wie roll_mean() in R: mind. 3 Werte der letzten 7 Tage
     const w = rows.slice(Math.max(0, i - 6), i + 1).map(r => r[k]).filter(v => v != null);
     return w.length >= 3 ? mean(w) : null;
   });
-  const s7 = roll("steps"), r7 = roll("resting_hr");
-  rows.forEach((r, i) => { r.steps_7d = s7[i]; r.rhr_7d = r7[i]; });
+  const s7 = roll("steps"), r7 = roll("resting_hr"), h7 = roll("hrv_night");
+  rows.forEach((r, i) => { r.steps_7d = s7[i]; r.rhr_7d = r7[i]; r.hrv_7d = h7[i]; });
   return rows;
 }
 const inRange = (t, from, to) => t >= from && t <= to;
@@ -217,8 +227,20 @@ function extraKpis(daily, from, to) {
   const warn = d.filter(r => r.flags >= 2).length;
   const warn14 = daily.filter(r => inRange(r.t, maxT - 13 * DAY, maxT) && r.flags >= 2).length;
   const share = P.n_hr_sessions ? P.n_exceed / P.n_hr_sessions : 0;
-  return `<div class="kpi"><div class="l">ACWR aktuell</div><div class="v">${nf(a, 2)}</div><div class="d ${bcls}">${band}</div></div>` +
-    `<div class="kpi"><div class="l">Tage mit ≥ 2 Warn-Signalen</div><div class="v">${warn}</div><div class="d ${warn14 >= 3 ? "bad" : ""}">${warn14} in den letzten 14 Tagen</div></div>` +
+  const lastOf = k => { const r = [...d].reverse().find(x => x[k] != null); return r ? r[k] : null; };
+  const hrvAvg = mean(d.slice(-7).map(r => r.hrv_night)), hrvRow = [...d].reverse().find(r => r.hrv_night != null);
+  const hrvCls = hrvRow ? (hrvRow.hrv_night < hrvRow.hrv_base_low ? "bad" : hrvRow.hrv_night >= hrvRow.hrv_base_low ? "good" : "") : "";
+  const rdy = lastOf("ready_score"), vo2 = lastOf("vo2max");
+  const wIn = WEIGHT.filter(w => inRange(tOf(w.date), from, to)), wAll = WEIGHT.filter(w => tOf(w.date) <= to);
+  const wLast = wAll.length ? wAll[wAll.length - 1] : null, wFirst = wIn.length ? wIn[0] : null;
+  const wDiff = wLast && wFirst && wIn.length > 1 ? wLast.weight_kg - wFirst.weight_kg : null;
+  const hasHrv = d.some(r => r.hrv_night != null), hasReady = d.some(r => r.ready_score != null);
+  const more = (hasHrv ? `<div class="kpi"><div class="l">HRV (Ø 7 Nächte)</div><div class="v">${nf(hrvAvg)}<small>ms</small></div><div class="d ${hrvCls}">${hrvRow ? "letzte Nacht " + nf(hrvRow.hrv_night) + " (Normal " + nf(hrvRow.hrv_base_low) + "–" + nf(hrvRow.hrv_base_high) + ")" : ""}</div></div>` : "") +
+    (hasReady ? `<div class="kpi"><div class="l">Training Readiness</div><div class="v">${nf(rdy)}</div><div class="d">${lastOf("ready_level") || ""}${lastOf("recovery_h") != null ? " · Erholung " + nf(lastOf("recovery_h")) + " h" : ""}</div></div>` : "") +
+    (vo2 != null ? `<div class="kpi"><div class="l">VO₂max</div><div class="v">${nf(vo2, 1)}<small>ml/kg/min</small></div><div class="d"></div></div>` : "") +
+    (wLast ? `<div class="kpi"><div class="l">Gewicht</div><div class="v">${nf(wLast.weight_kg, 1)}<small>kg</small></div><div class="d">${wDiff != null ? (wDiff > 0 ? "+" : "") + nf(wDiff, 1) + " kg im Zeitraum" : "letzte Wiegung " + wLast.date.slice(5).split("-").reverse().join(".")}</div></div>` : "");
+  return more + `<div class="kpi"><div class="l">ACWR aktuell</div><div class="v">${nf(a, 2)}</div><div class="d ${bcls}">${band}</div></div>` +
+    `<div class="kpi"><div class="l">Tage mit ≥ 2 Warn-Signalen (von 4)</div><div class="v">${warn}</div><div class="d ${warn14 >= 3 ? "bad" : ""}">${warn14} in den letzten 14 Tagen</div></div>` +
     `<div class="kpi"><div class="l">HFmax (Zonen-Basis)</div><div class="v">${P.hrmax}<small>bpm</small></div><div class="d ${share > 0.15 ? "bad" : ""}">${P.hrmax_source}${share > 0.15 ? " · zu niedrig?" : ""}</div></div>`;
 }
 
@@ -276,8 +298,9 @@ function makeCharts() {
   mk("c-acwr", { type: "line", data: { labels: [], datasets: [
       { label: "Untergrenze 0,8", data: [], borderWidth: 0, pointRadius: 0 },
       { label: "Richtbereich 0,8–1,3", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#009E7335", fill: "-1" },
-      { label: "ACWR", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25 }] },
-    options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze 0,8"]), { tooltip: { filter: i => i.dataset.label === "ACWR", callbacks: { label: c => `ACWR: ${nf(c.parsed.y, 2)}` } } }),
+      { label: "ACWR (eigene Berechnung)", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25 },
+      { label: "ACWR (Garmin)", data: [], borderColor: "#888", borderDash: [5, 4], borderWidth: 1.8, pointRadius: 0, tension: .25 }] },
+    options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze 0,8"]), { tooltip: { filter: i => i.dataset.label.startsWith("ACWR"), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 2)}` } } }),
       scales: { x: gridX(false), y: { min: 0, grid: { color: css("--grid") } } } }) });
   mk("c-rhrbase", { type: "line", data: { labels: [], datasets: [
       { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0 },
@@ -288,9 +311,34 @@ function makeCharts() {
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "bpm" } } } }) });
   mk("c-flags", { type: "bar", data: { labels: [], datasets: [{ label: "Signale", data: [], backgroundColor: [] }] },
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: {
-        label: c => { const r = flagRows[c.dataIndex]; const s = [r.sig_rhr && "Ruhepuls erhöht", r.sig_sleep && "Schlaf-Score niedrig", r.sig_bb && "Body Battery niedrig"].filter(Boolean);
+        label: c => { const r = flagRows[c.dataIndex]; const s = [r.sig_rhr && "Ruhepuls erhöht", r.sig_sleep && "Schlaf-Score niedrig", r.sig_bb && "Body Battery niedrig", r.sig_hrv && "HRV niedrig"].filter(Boolean);
           return s.length ? s : "keine Signale"; } } } },
-      scales: { x: gridX(false), y: { min: 0, max: 3, ticks: { stepSize: 1, precision: 0 }, grid: { color: css("--grid") } } } }) });
+      scales: { x: gridX(false), y: { min: 0, max: 4, ticks: { stepSize: 1, precision: 0 }, grid: { color: css("--grid") } } } }) });
+  const hhmm = v => String(Math.floor(v) % 24).padStart(2, "0") + ":" + String(Math.round((v % 1) * 60) % 60).padStart(2, "0");
+  mk("c-hrv", { type: "line", data: { labels: [], datasets: [
+      { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0 },
+      { label: "Garmin-Normalbereich", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#99999933", fill: "-1" },
+      { label: "HRV Nacht", data: [], showLine: false, borderColor: "#7B5EA7", backgroundColor: "#7B5EA7", pointRadius: 3 },
+      { label: "7-Tage-Mittel", data: [], borderColor: "#4B2E83", borderWidth: 2.5, pointRadius: 0, tension: .25 }] },
+    options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze"]), { tooltip: { filter: i => ["HRV Nacht", "7-Tage-Mittel"].includes(i.dataset.label), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 0)} ms` } } }),
+      scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "ms" } } } }) });
+  mk("c-ready", { type: "bar", data: { labels: [], datasets: [{ label: "Readiness", data: [], backgroundColor: [] }] },
+    options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => { const r = readyRows[c.dataIndex]; return `Score ${nf(c.parsed.y)} (${r.ready_level || "–"})`; } } } },
+      scales: { x: gridX(false), y: { min: 0, max: 100, grid: { color: css("--grid") } } } }) });
+  mk("c-sleeptime", { type: "line", data: { labels: [], datasets: [
+      { label: "Einschlafen", data: [], borderColor: "#34495E", backgroundColor: "#34495E", pointRadius: 2.5, borderWidth: 1.5, tension: .2 },
+      { label: "Aufwachen", data: [], borderColor: "#E69F00", backgroundColor: "#E69F00", pointRadius: 2.5, borderWidth: 1.5, tension: .2 }] },
+    options: baseOpts({ plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${hhmm(c.parsed.y)}` } } },
+      scales: { x: gridX(false), y: { grid: { color: css("--grid") }, ticks: { callback: v => hhmm(v) } } } }) });
+  mk("c-vitals", { data: { labels: [], datasets: [
+      { type: "bar", label: "Hauttemperatur-Abweichung (°C)", data: [], backgroundColor: "#D55E00AA", yAxisID: "y", order: 2 },
+      { type: "line", label: "SpO₂ Ø (%)", data: [], borderColor: "#0072B2", borderWidth: 1.5, pointRadius: 0, yAxisID: "y2", order: 1 },
+      { type: "line", label: "SpO₂ min (%)", data: [], borderColor: "#56B4E9", borderWidth: 1.5, pointRadius: 0, yAxisID: "y2", order: 1 }] },
+    options: baseOpts({ scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "°C" } },
+      y2: { position: "right", min: 80, max: 100, grid: { display: false }, title: { display: true, text: "% SpO₂" } } } }) });
+  mk("c-weight", { type: "line", data: { labels: [], datasets: [{ label: "Gewicht (kg)", data: [], borderColor: "#1B7F79", backgroundColor: "#1B7F79", pointRadius: 4, borderWidth: 2, spanGaps: true, tension: .2 }] },
+    options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${nf(c.parsed.y, 1)} kg` } } },
+      scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "kg" } } } }) });
   mk("c-ride", { type: "bar", data: { labels: [], datasets: [{ label: "km", data: [], backgroundColor: GROUP_COLORS["Rad"] }] },
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${nf(c.parsed.y, 1)} km` } } },
       scales: { x: { grid: { display: false }, ticks: { maxRotation: 0 } },
@@ -301,17 +349,24 @@ function setData(id, labels, sets) {
   sets.forEach((d, i) => c.data.datasets[i].data = d);
   c.update("none");
 }
-let flagRows = [];
-const FLAG_COLORS = ["#00000000", "#E69F00", "#D55E00", "#B3261E"];
+let flagRows = [], readyRows = [];
+const FLAG_COLORS = ["#00000000", "#E69F00", "#D55E00", "#B3261E", "#7A1712"];
 function updateLoadCharts(d, L) {
   const un = r => r.unrecorded ? null : undefined;
   setData("c-load", L, [d.map(r => r.load_meas), d.map(r => r.load_est), d.map(r => r.acute_d), d.map(r => r.chronic_d)]);
-  setData("c-acwr", L, [d.map(() => 0.8), d.map(() => 1.3), d.map(r => r.acwr)]);
+  setData("c-acwr", L, [d.map(() => 0.8), d.map(() => 1.3), d.map(r => r.acwr), d.map(r => r.ts_acwr)]);
   const rh = r => (r.resting_hr != null && r.resting_hr >= 45) ? r.resting_hr : null;
   setData("c-rhrbase", L, [d.map(r => r.rhr_lo), d.map(r => r.rhr_hi), d.map(r => r.rhr_base), d.map(rh)]);
   const c = charts["c-rhrbase"]; c.data.datasets[3].pointBackgroundColor = d.map(r => r.sig_rhr ? "#B3261E" : "#E69F00");
   c.data.datasets[3].pointRadius = d.map(r => r.sig_rhr ? 5 : 3); c.update("none");
-  flagRows = d;
+  flagRows = d; readyRows = d;
+  setData("c-hrv", L, [d.map(r => r.hrv_base_low), d.map(r => r.hrv_base_high), d.map(r => r.hrv_night), d.map(r => r.hrv_7d)]);
+  const rc = charts["c-ready"]; rc.data.datasets[0].backgroundColor = d.map(r => r.ready_score == null ? "#00000000" : r.ready_score >= 75 ? "#1a7f4b" : r.ready_score >= 50 ? "#56B4E9" : r.ready_score >= 25 ? "#E69F00" : "#B3261E");
+  setData("c-ready", L, [d.map(r => r.ready_score)]);
+  setData("c-sleeptime", L, [d.map(r => r.bed_h), d.map(r => r.wake_h)]);
+  setData("c-vitals", L, [d.map(r => r.skin_temp_dev), d.map(r => r.spo2_avg), d.map(r => r.spo2_low)]);
+  const wmap = new Map(WEIGHT.map(w => [w.date, w.weight_kg]));
+  setData("c-weight", L, [d.map(r => wmap.has(r.date) ? wmap.get(r.date) : null)]);
   const f = charts["c-flags"]; f.data.datasets[0].backgroundColor = d.map(r => FLAG_COLORS[r.flags] || FLAG_COLORS[3]);
   setData("c-flags", L, [d.map(r => r.flags)]);
 }
@@ -326,17 +381,25 @@ function renderRecovery() {
     <div class="note">p: Permutationstest. Ein Zusammenhang, kein Beweis: HIIT liegt meist am frühen Abend und oft auf Montagen; ${RECOVERY[0].n_hiit} HIIT- gegen ${RECOVERY[0].n_other} andere Tage. Zeiträume ohne Aufzeichnung und Nächte unter ${MIN_SLEEP_H} h sind ausgeschlossen.</div>`;
 }
 function renderZones() {
-  const P = META.profile, { from, to } = range();
-  const s = ACTS.filter(a => inRange(actT(a), from, to) && a.zone);
-  const cnt = z => s.filter(a => a.zone === z).length;
-  const rows = P.zones.map(z => `<tr><td>${z.zone}</td><td class="num">${z.lo}–${z.hi}</td><td class="num">${cnt(z.zone)}</td></tr>`).join("");
-  const below = cnt("<Z1");
+  const P = META.profile, G = META.garmin_zones, { from, to } = range();
+  const inR = ACTS.filter(a => inRange(actT(a), from, to));
+  let rows, note1;
+  if (G) {
+    const mins = [1, 2, 3, 4, 5].map(i => sum(inR.map(a => a["z" + i + "_min"])));
+    const tot = sum(mins);
+    rows = G.lows.map((lo, i) => `<tr><td>Z${i + 1}</td><td class="num">${lo}–${i < 4 ? G.lows[i + 1] - 1 : G.hrmax}</td><td class="num">${nf(mins[i], 0)}</td><td class="num">${tot ? nf(mins[i] / tot * 100, 0) : "–"} %</td></tr>`).join("");
+    note1 = `Zeit in den Garmin-Zonen (${G.n_sessions} Einheiten mit Pulsdaten, Garmin rechnet mit HFmax ${G.hrmax} bpm). Zonen: 50–60 %, 60–70 %, 70–80 %, 80–90 %, 90–100 % der HFmax.`;
+  } else {
+    rows = P.zones.map(z => { const n = inR.filter(a => a.zone === z.zone).length; return `<tr><td>${z.zone}</td><td class="num">${z.lo}–${z.hi}</td><td class="num">${n}</td><td class="num"></td></tr>`; }).join("");
+    note1 = "Zonen nach Karvonen aus Durchschnittspuls je Einheit (Zeit in Zonen nicht verfügbar).";
+  }
   const share = P.n_hr_sessions ? Math.round(P.n_exceed / P.n_hr_sessions * 100) : 0;
+  const diff = G ? ` Eigene Schätzung: ${P.hrmax} bpm (${P.hrmax_source}); Garmin nutzt ${G.hrmax} bpm.` : "";
   document.getElementById("zones-card").innerHTML = `<h3>Herzfrequenz-Zonen</h3>
-    <div class="sub">Karvonen (Herzfrequenzreserve): Alter ${P.age}, Ruhe-HF ${P.rhr_ref} bpm, HFmax ${P.hrmax} bpm (${P.hrmax_source}). Einheiten nach Durchschnittspuls</div>
-    <table class="mini"><thead><tr><th>Zone</th><th>bpm</th><th>Einheiten im Zeitraum</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="note">${below ? below + " Einheiten unter Zone 1. " : ""}Zonen basieren auf dem Durchschnittspuls je Einheit, nicht auf der Zeit in Zonen.</div>
-    <div class="note ${share > 15 ? "warn" : ""}">${P.n_exceed} von ${P.n_hr_sessions} Einheiten (${share} %) hatten einen Spitzenpuls über dem HFmax-Wert.${share > 15 ? " Die HFmax-Schätzung ist vermutlich zu niedrig oder der Handgelenk-Sensor liefert Ausreißer: HFmax per Belastungstest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen." : ""}</div>`;
+    <div class="sub">Alter ${P.age}, Ruhe-HF ${P.rhr_ref} bpm. ${G ? "Minuten im ausgewählten Zeitraum" : "Einheiten im Zeitraum"}</div>
+    <table class="mini"><thead><tr><th>Zone</th><th>bpm</th><th>${G ? "Minuten" : "Einheiten"}</th><th>Anteil</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="note">${note1}${diff}</div>
+    <div class="note ${share > 15 ? "warn" : ""}">${P.n_exceed} von ${P.n_hr_sessions} Einheiten (${share} %) hatten einen Spitzenpuls über dem HFmax-Wert (${P.hrmax} bpm).${share > 15 ? " HFmax vermutlich zu niedrig oder Handgelenk-Sensor mit Ausreißern: per Belastungstest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen." : ""}</div>`;
 }
 function updateCharts(daily) {
   const { from, to } = range();
@@ -375,8 +438,9 @@ const COLS = [
   { f: "kcal", l: "kcal", num: 1, d: 0 },
   { f: "te_aerobic", l: "TE aerob", num: 1, d: 1 },
   { f: "te_anaerobic", l: "TE anaerob", num: 1, d: 1 },
-  { f: "zone", l: "Zone" },
-  { f: "trimp", l: "TRIMP", num: 1, d: 0, fmtRow: r => r.trimp == null ? "–" : (r.est ? "~" : "") + nf(r.trimp, 0) },
+  { f: "zone", l: "Zone Ø" },
+  { f: "pct_z45", l: "% in Z4–5", num: 1, d: 0 },
+  { f: "trimp", l: "TRIMP", num: 1, d: 0, fmtRow: r => r.trimp == null ? "–" : (r.trimp_src === "geschätzt" ? "~" : "") + nf(r.trimp, 0) },
 ];
 function renderTable() {
   const { from, to } = range();

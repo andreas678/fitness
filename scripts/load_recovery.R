@@ -32,20 +32,51 @@ athlete_profile <- function(rhr_ref, today = Sys.Date()) {
 
 # ---- Belastung je Einheit ----------------------------------------------------------
 # Banister-TRIMP = Dauer(min) * HRR * 0.64 * exp(b * HRR), HRR = (HF - HFruhe)/(HFmax - HFruhe).
-# Genutzt wird nur die Durchschnitts-HF der Einheit (keine Zeit in Zonen verfügbar).
+# Mit Zeit-in-Zonen (garmin_activity_zones.csv, Garmin-Zonen) wird je Zone mit der Zonenmitte
+# gerechnet, das bildet Intervalle richtig ab. Ohne Zonendaten zählt nur der Durchschnittspuls.
 # Radfahrten ohne Pulsdaten (Pendeln) bekommen eine ANNAHME (commute_hrr) und sind als
 # "geschätzt" markiert.
-session_load <- function(acts, p, commute_hrr = 0.40) {
-  acts |> mutate(
+banister <- function(minutes, hrr, b) minutes * hrr * 0.64 * exp(b * hrr)
+
+# Garmin-Zonen (% der in Garmin eingestellten HFmax; Untergrenze Z1 = 50 %)
+zone_trimp <- function(zones, p) {
+  if (is.null(zones) || nrow(zones) == 0) return(NULL)
+  hrmax_g <- 2 * zones$z1_low                                    # Garmin-HFmax aus Z1-Untergrenze
+  mids <- cbind((zones$z1_low + zones$z2_low) / 2, (zones$z2_low + zones$z3_low) / 2,
+                (zones$z3_low + zones$z4_low) / 2, (zones$z4_low + zones$z5_low) / 2,
+                (zones$z5_low + hrmax_g) / 2)
+  hrr  <- pmin(pmax((mids - p$rhr_ref) / (p$hrmax - p$rhr_ref), 0), 1)
+  secs <- as.matrix(zones[paste0("z", 1:5, "_s")]); secs[is.na(secs)] <- 0
+  tibble(activity_id = zones$activity_id,
+         trimp_z = rowSums(banister(secs / 60, hrr, p$trimp_b)),
+         z_min   = rowSums(secs) / 60,
+         pct_z45 = ifelse(rowSums(secs) > 0, (secs[, 4] + secs[, 5]) / rowSums(secs) * 100, NA_real_),
+         z1_min = secs[, 1] / 60, z2_min = secs[, 2] / 60, z3_min = secs[, 3] / 60,
+         z4_min = secs[, 4] / 60, z5_min = secs[, 5] / 60)
+}
+
+session_load <- function(acts, p, commute_hrr = 0.40, zones = NULL) {
+  zt <- zone_trimp(zones, p)
+  out <- acts |> mutate(
     hrr       = (avg_hr - p$rhr_ref) / (p$hrmax - p$rhr_ref),
     est       = is.na(avg_hr) & type_key %in% "cycling",
     hrr_use   = pmin(pmax(ifelse(est, commute_hrr, hrr), 0), 1),
-    trimp     = ifelse(is.na(hrr_use), NA_real_,
-                       duration_min * hrr_use * 0.64 * exp(p$trimp_b * hrr_use)),
+    trimp     = ifelse(is.na(hrr_use), NA_real_, banister(duration_min, hrr_use, p$trimp_b)),
     zone      = as.character(cut(hrr, c(-Inf, .5, .6, .7, .8, .9, Inf),
                                  labels = c("<Z1", paste0("Z", 1:5)))),
     pct_hrmax = avg_hr / p$hrmax * 100
   ) |> select(-hrr, -hrr_use)
+  if (!is.null(zt)) {
+    out <- out |> left_join(zt, by = "activity_id") |>
+      mutate(trimp_src = ifelse(!is.na(trimp_z), "zonen", ifelse(est, "geschätzt", ifelse(is.na(trimp), NA, "durchschnitt"))),
+             trimp = ifelse(!is.na(trimp_z), trimp_z, trimp)) |>
+      select(-trimp_z)
+  } else {
+    out <- out |> mutate(trimp_src = ifelse(est, "geschätzt", ifelse(is.na(trimp), NA, "durchschnitt")),
+                         z_min = NA_real_, pct_z45 = NA_real_, z1_min = NA_real_, z2_min = NA_real_,
+                         z3_min = NA_real_, z4_min = NA_real_, z5_min = NA_real_)
+  }
+  out
 }
 
 # ---- Tageswerte: Last, ACWR, Baselines, Erholungs-Signale -------------------------------
@@ -94,13 +125,15 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
     m <- roll_apply(x, k, mean, min_n, lag_by = 1); s <- roll_apply(x, k, sd, min_n, lag_by = 1)
     list(m = m, s = s, z = ifelse(!is.na(s) & s > 0, (x - m) / s, NA_real_))
   }
-  zr <- z(rhr); zs <- z(sleep); zb <- z(bb)
+  hrv   <- if ("hrv_night" %in% names(d)) ifelse(bad, NA, d$hrv_night) else rep(NA_real_, nrow(d))
+  zr <- z(rhr); zs <- z(sleep); zb <- z(bb); zh <- z(hrv)
   d$rhr_base <- zr$m; d$rhr_lo <- zr$m - 1.5 * zr$s; d$rhr_hi <- zr$m + 1.5 * zr$s
-  d$rhr_z <- zr$z; d$sleep_z <- zs$z; d$bb_z <- zb$z
+  d$rhr_z <- zr$z; d$sleep_z <- zs$z; d$bb_z <- zb$z; d$hrv_z <- zh$z
   d$sig_rhr   <- coalesce(zr$z >= 1.5, FALSE)    # Ruhepuls deutlich erhöht
   d$sig_sleep <- coalesce(zs$z <= -1, FALSE)     # Schlaf-Score deutlich niedriger
   d$sig_bb    <- coalesce(zb$z <= -1, FALSE)     # Body-Battery-Höchstwert deutlich niedriger
-  d$flags <- d$sig_rhr + d$sig_sleep + d$sig_bb
+  d$sig_hrv   <- coalesce(zh$z <= -1, FALSE)     # nächtliche HRV deutlich niedriger
+  d$flags <- d$sig_rhr + d$sig_sleep + d$sig_bb + d$sig_hrv
   d
 }
 
@@ -114,16 +147,20 @@ perm_p <- function(x, y, B = 10000) {
 
 recovery_summary <- function(d) {
   d <- d |> mutate(sleep_ok = !is.na(sleep_h) & sleep_h >= 5)
-  nx <- d |> transmute(date = date - 1,
-                       sleep_score_n = ifelse(sleep_ok, sleep_score, NA),
-                       deep_h_n = ifelse(sleep_ok, deep_h, NA),
-                       bb_high_n = ifelse(sleep_ok, bb_high, NA),
-                       resting_hr_n = ifelse(resting_hr >= 45, resting_hr, NA))
+  has <- function(col) col %in% names(d)
+  ok  <- function(col) if (has(col)) ifelse(d$sleep_ok, d[[col]], NA) else rep(NA_real_, nrow(d))
+  nx <- tibble(date = d$date - 1,
+               sleep_score_n = ok("sleep_score"), deep_h_n = ok("deep_h"), bb_high_n = ok("bb_high"),
+               resting_hr_n = ifelse(d$resting_hr >= 45, d$resting_hr, NA),
+               hrv_n = ok("hrv_night"), sleep_hr_n = ok("sleep_hr"), ready_n = ok("ready_score"))
   x <- d |> filter(!unrecorded) |> select(date, hiit, te_max) |> inner_join(nx, by = "date")
   mets <- c(sleep_score_n = "Schlaf-Score", deep_h_n = "Tiefschlaf (h)",
-            bb_high_n = "Body-Battery-Höchstwert", resting_hr_n = "Ruhepuls (bpm)")
+            bb_high_n = "Body-Battery-Höchstwert", resting_hr_n = "Ruhepuls (bpm)",
+            hrv_n = "HRV nachts (ms)", sleep_hr_n = "Puls im Schlaf (bpm)",
+            ready_n = "Training Readiness")
   bind_rows(lapply(names(mets), function(m) {
     a <- x[[m]][x$hiit]; b <- x[[m]][!x$hiit]; a <- a[!is.na(a)]; b <- b[!is.na(b)]
+    if (length(a) < 5 || length(b) < 5) return(NULL)
     tibble(metric = mets[[m]], hiit = mean(a), other = mean(b), diff = mean(a) - mean(b),
            p = perm_p(a, b), n_hiit = length(a), n_other = length(b))
   }))
