@@ -1,0 +1,32 @@
+# --- Private Gesundheits- und Standortdaten (Garmin) ---------------------------
+# Aktivitätsnamen enthalten Orte, Tageswerte Schlaf, Puls und Körperdaten.
+data/*
+_outputs/*
+
+# --- Zugangsdaten ---------------------------------------------------------------
+# GARMIN_EMAIL / GARMIN_PASSWORD stehen in ~/.Renviron, Tokens in ~/.garminconnect
+# (beides außerhalb des Projekts). Falls je projektlokal angelegt: nicht committen.
+.Renviron
+.env
+.garminconnect/
+*.token
+*.tokens
+
+# --- R / RStudio ----------------------------------------------------------------
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rcheck/
+renv/library/
+renv/staging/
+
+# --- Python (virtualenv für reticulate) -----------------------------------------
+__pycache__/
+*.pyc
+.venv/
+
+# --- macOS / Synology -----------------------------------------------------------
+.DS_Store
+@eaDir/
+*.synology*
