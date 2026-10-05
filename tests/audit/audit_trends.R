@@ -1,0 +1,8 @@
+# Plan 02: Anpassungs-Trends auf den echten Daten, über den Produktionsweg (Annotationen angewendet)
+suppressPackageStartupMessages({library(here);library(dplyr);library(readr);library(tibble)})
+source(here("scripts","helpers.R"))
+d <- read_csv(here("data","garmin_daily.csv"),show_col_types=FALSE) |> apply_annotations(read_annotations())
+res <- adaptation_trends(d)
+options(width = 140); cat("Trends (letzte 12 vollständige Wochen):\n"); print(res$trend, digits = 3)
+cat("\nWochenwerte Ruhepuls:\n"); print(filter(res$weekly, metric == "resting_hr") |> select(week, value, n_days, fit), n = 20, digits = 4)
+if (!is.na(Sys.getenv("TRENDS_CSV", NA))) write_csv(res$weekly, Sys.getenv("TRENDS_CSV"))

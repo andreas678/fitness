@@ -226,3 +226,63 @@ weight_trend <- function(w, min_n = 8, span = 0.75) {
   tibble::tibble(date = grid, fit = as.numeric(pr$fit),
                  lo = as.numeric(pr$fit - tc * pr$se.fit), hi = as.numeric(pr$fit + tc * pr$se.fit))
 }
+
+# ---- Anpassungs-Trends: Wochentrend von Ruhepuls, HRV und Puls im Schlaf -----------------------------
+# Tageswerte streuen stark (Schlaf, Stress, Wärme, Krankheit). Deshalb Wochenmittel (Montag-Wochen) und eine
+# lineare Steigung über die letzten `weeks` vollständigen Wochen mit 95-%-Konfidenzintervall (t-Verteilung).
+# Eine Woche zählt nur mit mindestens `min_days` gültigen Tagen und höchstens `max_ann_share` annotierter
+# Tage (z. B. Segeltörn); unvollständige Tage und Artefakte (clean_daily) zählen nicht. Unter `min_weeks`
+# Wochen gibt es keine Steigung. HRV wird logarithmisch gefittet (multiplikative Schwankung), die Steigung
+# steht dann in Prozent je Woche, die Wochenwerte sind in ms zurückgerechnet (geometrisches Mittel).
+# Näherung: Die Wochenmittel sind schwächer autokorreliert als Tageswerte, bei etwa 12 Punkten ist das
+# Intervall dennoch nur ungefähr; es beschreibt einen Zusammenhang, keine Ursache (Training wirkt hier nicht
+# von Schlaf, Stress und Krankheit getrennt).
+TREND_METRICS <- tibble::tibble(col = c("resting_hr", "hrv_night", "sleep_hr"),
+                                log = c(FALSE, TRUE, FALSE),
+                                unit = c("bpm/Woche", "%/Woche", "bpm/Woche"))
+
+adaptation_trends <- function(daily, weeks = 12, min_days = 4, min_weeks = 6, max_ann_share = 0.5,
+                              today = Sys.Date()) {
+  empty <- list(
+    weekly = tibble::tibble(metric = character(), week = as.Date(character()), value = numeric(),
+                            n_days = integer(), fit = numeric()),
+    trend = tibble::tibble(metric = character(), slope_unit = character(), slope = numeric(), lo = numeric(),
+                           hi = numeric(), n_weeks = integer(), verdict = character()))
+  if (nrow(daily) == 0) return(empty)
+  d <- clean_daily(daily, today = today)
+  d$date <- as.Date(d$date)
+  if (all(d$partial)) return(empty)
+  last_day <- max(d$date[!d$partial])
+  d$week <- d$date - (as.integer(format(d$date, "%u")) - 1)             # Montag der Woche
+  full <- d$week[d$week + 6 <= last_day]
+  if (length(full) == 0) return(empty)
+  last_wk <- max(full); first_wk <- last_wk - 7 * (weeks - 1)
+  d$ann <- if ("ann_note" %in% names(d)) !is.na(d$ann_note) else FALSE
+  d <- d[d$week >= first_wk & d$week <= last_wk, ]
+  weekly <- list(); trend <- list()
+  for (i in seq_len(nrow(TREND_METRICS))) {
+    m <- TREND_METRICS$col[i]
+    if (!m %in% names(d)) next
+    v <- d[[m]]; v[d$partial] <- NA
+    if (TREND_METRICS$log[i]) v <- ifelse(!is.na(v) & v > 0, log(v), NA_real_)
+    wk <- d |> dplyr::mutate(v = v) |> dplyr::group_by(week) |>
+      dplyr::summarise(n = sum(!is.na(v)), m = mean(v, na.rm = TRUE), ann = sum(ann) / 7, .groups = "drop") |>
+      dplyr::filter(n >= min_days, ann < max_ann_share)
+    bk <- if (TREND_METRICS$log[i]) exp else identity
+    row <- list(metric = m, slope_unit = TREND_METRICS$unit[i], slope = NA_real_, lo = NA_real_, hi = NA_real_,
+                n_weeks = nrow(wk), verdict = "zu wenig Daten")
+    fit <- rep(NA_real_, nrow(wk))
+    if (nrow(wk) >= min_weeks) {
+      x <- as.numeric(wk$week - first_wk) / 7
+      f <- stats::lm(wk$m ~ x); ci <- stats::confint(f)["x", ]; b <- unname(coef(f)["x"])
+      tf <- if (TREND_METRICS$log[i]) function(z) 100 * (exp(z) - 1) else identity
+      row[c("slope", "lo", "hi")] <- list(tf(b), tf(unname(ci[1])), tf(unname(ci[2])))
+      row$verdict <- if (ci[1] > 0) "steigend" else if (ci[2] < 0) "fallend" else "kein klarer Trend"
+      fit <- bk(unname(stats::fitted(f)))
+    }
+    trend[[m]] <- tibble::as_tibble(row)
+    weekly[[m]] <- tibble::tibble(metric = m, week = wk$week, value = bk(wk$m), n_days = as.integer(wk$n), fit = fit)
+  }
+  if (length(trend) == 0) return(empty)
+  list(weekly = dplyr::bind_rows(weekly), trend = dplyr::bind_rows(trend))
+}
