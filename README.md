@@ -1,6 +1,6 @@
 # Fitness-Auswertung aus Garmin Connect
 
-Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholung nach gängigen sportwissenschaftlichen Methoden und erzeugt daraus PNG-Grafiken und ein interaktives HTML-Dashboard. Alles läuft lokal; die Daten verlassen den Rechner nicht (außer dem Abruf bei Garmin selbst).
+Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholung nach gängigen sportwissenschaftlichen Methoden und erzeugt daraus ein interaktives HTML-Dashboard. Alles läuft lokal; die Daten verlassen den Rechner nicht (außer dem Abruf bei Garmin selbst).
 
 > **Hinweis:** Garmin bietet keine offizielle API für Privatnutzer. Das Projekt nutzt die inoffizielle Python-Bibliothek [`garminconnect`](https://github.com/cyberjunky/python-garminconnect). Sie kann sich ohne Vorwarnung ändern. Die Auswertung ist ein Trainingswerkzeug, kein medizinisches Produkt.
 
@@ -8,12 +8,11 @@ Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholu
 
 - **`_outputs/fitness_dashboard.html`**: interaktives Dashboard (Kennzahlen, Trainingsbelastung, ACWR, Aufbau und Ermüdung, Erholungs-Index, Anpassungs-Trends, HRV, Schlaf, Gewichtstrend, Herzfrequenzzonen, Aktivitätstabelle).
   Der Zeitraum lässt sich über die Voreinstellungen (30, 60, 90 Tage, alles) oder frei einstellen: Doppel-Schieberegler und Datumsfelder für Anfang und Ende. Die Vergleichswerte beziehen sich auf den gleich langen Zeitraum davor. Die Anpassungs-Trends (feste 12 Wochen) und die Erholung nach HIIT (gesamte Datenbasis) sind vom Zeitraum unabhängig.
-- **`_outputs/*.png`**: Einzelgrafiken und `fitness_dashboard.png` (Schritte, Ruhepuls, Schlaf, Wochenumfang, Rad-Kilometer, Puls je Aktivität, Body Battery).
-- Konsolenausgabe mit Kurzauswertung, Plausibilitätsprüfung und Sensitivitätstabelle.
+- Konsolenausgabe von `build_dashboard.R` mit Plausibilitätsprüfung und Sensitivitätstabelle.
 
 ## Voraussetzungen
 
-- **R** (Pakete): `here`, `dplyr`, `tidyr`, `ggplot2`, `lubridate`, `readr`, `scales`, `tibble`, `jsonlite`, `reticulate`, `patchwork`, `ragg`, `sandwich`. Für die Tests zusätzlich `testthat`.
+- **R** (Pakete): `here`, `dplyr`, `lubridate`, `readr`, `tibble`, `jsonlite`, `reticulate`, `sandwich`. Für die Tests zusätzlich `testthat`.
 - **Python 3**: Das virtualenv `r-garmin` mit `garminconnect` legt `garmin_fitness.R` beim ersten Lauf selbst an.
 - **Node.js** nur für den JavaScript-Test (optional).
 - Für das Dashboard ist Internet nötig: Chart.js wird per CDN geladen.
@@ -22,8 +21,8 @@ Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholu
 
 1. R-Pakete installieren:
    ```r
-   install.packages(c("here", "dplyr", "tidyr", "ggplot2", "lubridate", "readr", "scales", "tibble",
-                      "jsonlite", "reticulate", "patchwork", "ragg", "sandwich", "testthat"))
+   install.packages(c("here", "dplyr", "lubridate", "readr", "tibble",
+                      "jsonlite", "reticulate", "sandwich", "testthat"))
    ```
 2. In `~/.Renviron` eintragen (Datei nach dem Speichern R neu starten):
 
@@ -41,7 +40,7 @@ Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholu
 Aus dem Projektordner:
 
 ```bash
-Rscript scripts/garmin_fitness.R              # Daten holen (inkrementell) und Grafiken erzeugen
+Rscript scripts/garmin_fitness.R              # Daten holen (inkrementell) und lokal speichern
 Rscript scripts/build_dashboard.R             # Dashboard aus den gespeicherten Daten bauen
 Rscript scripts/update_weather.R              # Tagestemperaturen nachladen (Open-Meteo, braucht Internet; garmin_fitness.R macht das ebenfalls)
 ```
@@ -50,7 +49,6 @@ Optionen:
 
 | Befehl | Wirkung |
 |---|---|
-| `garmin_fitness.R --demo` | Testlauf mit synthetischen Daten, nichts wird von Garmin geladen. |
 | `garmin_fitness.R --refresh` | Cache ignorieren und alles neu laden (viele API-Aufrufe, dauert). |
 | `build_dashboard.R --recalc-profile` | Feste Referenzwerte (Ruhepuls, Pendel-Puls) neu bestimmen. |
 
@@ -111,7 +109,7 @@ node tests/js/test_date_range.mjs                                         # Java
 
 ```
 scripts/
-  garmin_fitness.R         Abruf, Cache, Grafiken, Kurzauswertung
+  garmin_fitness.R         Abruf, Cache, Plausibilitätsprüfung
   build_dashboard.R        HTML-Dashboard bauen
   dashboard_template.html  Vorlage (Chart.js, Auswertung im Browser)
   helpers.R                gemeinsame Funktionen (Bereinigung, Annotationen, Referenzen, Prüfungen, Gewichts- und Anpassungstrends)
@@ -122,7 +120,7 @@ scripts/
 tests/                     R-, Python- und JavaScript-Tests, Audit-Skripte
 plans/                     Pläne und Ergebnisberichte (Methodenprüfung, Trainingsentwicklung)
 data/                      lokale Daten (git-ignoriert)
-_outputs/                  erzeugte Grafiken und Dashboard (git-ignoriert)
+_outputs/                  erzeugtes Dashboard (git-ignoriert)
 ```
 
 Die Ergebnisberichte mit offenen Punkten stehen in [`plans/01-audit-fixes-ergebnis.md`](plans/01-audit-fixes-ergebnis.md) und [`plans/02-trainingsentwicklung-ergebnis.md`](plans/02-trainingsentwicklung-ergebnis.md).
