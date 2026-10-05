@@ -95,3 +95,48 @@ test_that("adaptation_trends prüft die Eingaben mit verständlichen Meldungen",
   expect_error(adaptation_trends(mk_tr(), min_days = 0, today = TODAY), "min_days")
   expect_error(adaptation_trends("kein Datensatz", today = TODAY), "data.frame")
 })
+
+# ---- Gesamtzeitraum neben dem festen Fenster -------------------------------------------------------------
+mk_dip <- function(seed = 2, sd = 0.1) {             # 18 Wochen: 54, dann 3 Wochen Tief (52), dann wieder 54
+  set.seed(seed)
+  d <- mk_tr(slope = 0, sd = 0.1, seed = seed)
+  wk <- floor(as.numeric(d$date - as.Date("2026-06-01")) / 7)
+  d$resting_hr <- ifelse(wk < 6, 54, ifelse(wk < 9, 52, 54)) + rnorm(nrow(d), 0, sd)
+  d
+}
+
+test_that("adaptation_trends liefert die Steigung auch über alle Wochen", {
+  r <- tr_of(adaptation_trends(mk_tr(slope = -0.2), today = TODAY), "resting_hr")
+  expect_true(all(c("slope_all", "lo_all", "hi_all", "n_weeks_all", "verdict_all", "window_sensitive") %in% names(r)))
+  expect_equal(r$n_weeks, 12); expect_equal(r$n_weeks_all, 18)
+  expect_equal(r$slope_all, -0.2, tolerance = 0.2); expect_equal(r$verdict_all, "fallend")
+  expect_false(r$window_sensitive)
+})
+
+test_that("adaptation_trends erkennt, wenn das Urteil vom Fenster abhängt", {
+  res <- adaptation_trends(mk_dip(), today = TODAY); r <- tr_of(res, "resting_hr")
+  expect_equal(r$verdict, "steigend")                  # Fenster beginnt im Tief
+  expect_equal(r$verdict_all, "kein klarer Trend")     # über alle Wochen kein Trend
+  expect_true(r$window_sensitive)
+  w <- res$weekly[res$weekly$metric == "resting_hr", ]
+  expect_false(anyNA(w$fit_all)); expect_lt(abs(diff(range(w$fit_all))), 1)   # flache Gerade über das Fenster
+})
+
+test_that("adaptation_trends: Gesamtzeitraum braucht ebenfalls mindestens 6 Wochen", {
+  d <- mk_tr(); d <- d[d$date >= as.Date("2026-08-31"), ]               # 5 Wochen
+  r <- tr_of(adaptation_trends(d, today = TODAY), "resting_hr")
+  expect_true(is.na(r$slope_all)); expect_equal(r$verdict_all, "zu wenig Daten"); expect_false(r$window_sensitive)
+})
+
+test_that("adaptation_trends: annotierte Wochen fehlen auch im Gesamtzeitraum", {
+  d <- mk_tr(); d$ann_note <- NA_character_
+  d$ann_note[d$date >= as.Date("2026-06-08") & d$date < as.Date("2026-06-22")] <- "Segeln"   # 2 Wochen weit vor dem Fenster
+  r <- tr_of(adaptation_trends(d, today = TODAY), "resting_hr")
+  expect_equal(r$n_weeks, 12); expect_equal(r$n_weeks_all, 16)
+})
+
+test_that("adaptation_trends: kürzere Daten als das Fenster geben identische Wochenzahl", {
+  d <- mk_tr(); d <- d[d$date >= as.Date("2026-07-27"), ]               # 10 Wochen, Fenster 12
+  r <- tr_of(adaptation_trends(d, today = TODAY), "resting_hr")
+  expect_equal(r$n_weeks, r$n_weeks_all); expect_equal(r$slope, r$slope_all)
+})

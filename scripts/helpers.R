@@ -241,13 +241,44 @@ TREND_METRICS <- tibble::tibble(col = c("resting_hr", "hrv_night", "sleep_hr"),
                                 log = c(FALSE, TRUE, FALSE),
                                 unit = c("bpm/Woche", "%/Woche", "bpm/Woche"))
 
+# Wochenmittel aus Tageswerten v (Spalten week, ann, partial in d); behält Wochen mit genug gültigen Tagen
+# und höchstens max_ann_share annotierter Tage.
+weekly_means <- function(d, v, min_days, max_ann_share) {
+  d$v <- v
+  d |> dplyr::group_by(week) |>
+    dplyr::summarise(n = sum(!is.na(v)), m = mean(v, na.rm = TRUE), ann = sum(ann) / 7, .groups = "drop") |>
+    dplyr::filter(n >= min_days, ann < max_ann_share)
+}
+
+# Lineare Steigung der Wochenmittel (Zeitachse in Wochen ab origin) mit t-basiertem 95-%-Intervall.
+# Rückgabe: slope/lo/hi (bei is_log in Prozent je Woche), verdict und die angepasste Gerade an den Wochen `at`
+# (bei is_log in ms zurückgerechnet). Unter min_weeks Wochen: NA und "zu wenig Daten".
+trend_fit <- function(wk, origin, is_log, min_weeks, at = wk$week) {
+  out <- list(slope = NA_real_, lo = NA_real_, hi = NA_real_, n_weeks = nrow(wk), verdict = "zu wenig Daten",
+              fit = rep(NA_real_, length(at)))
+  if (nrow(wk) < min_weeks) return(out)
+  f <- stats::lm(m ~ x, data = data.frame(m = wk$m, x = as.numeric(wk$week - origin) / 7))
+  ci <- stats::confint(f)["x", ]; b <- unname(coef(f)["x"])
+  tf <- if (is_log) function(z) 100 * (exp(z) - 1) else identity
+  bk <- if (is_log) exp else identity
+  out[c("slope", "lo", "hi")] <- list(tf(b), tf(unname(ci[1])), tf(unname(ci[2])))
+  out$verdict <- if (ci[1] > 0) "steigend" else if (ci[2] < 0) "fallend" else "kein klarer Trend"
+  out$fit <- bk(unname(stats::predict(f, data.frame(x = as.numeric(at - origin) / 7))))
+  out
+}
+
+# Neben dem festen Fenster (weeks) wird dieselbe Steigung über alle vollständigen Wochen gerechnet
+# (slope_all, ...). window_sensitive = TRUE, wenn beide Urteile abweichen: Dann hängt die Aussage von der
+# Fensterwahl ab (z. B. Fenster beginnt in einem Tief) und gehört nicht als Befund gewertet.
 adaptation_trends <- function(daily, weeks = 12, min_days = 4, min_weeks = 6, max_ann_share = 0.5,
                               today = Sys.Date()) {
   empty <- list(
     weekly = tibble::tibble(metric = character(), week = as.Date(character()), value = numeric(),
-                            n_days = integer(), fit = numeric()),
+                            n_days = integer(), fit = numeric(), fit_all = numeric()),
     trend = tibble::tibble(metric = character(), slope_unit = character(), slope = numeric(), lo = numeric(),
-                           hi = numeric(), n_weeks = integer(), verdict = character()),
+                           hi = numeric(), n_weeks = integer(), verdict = character(), slope_all = numeric(),
+                           lo_all = numeric(), hi_all = numeric(), n_weeks_all = integer(), verdict_all = character(),
+                           window_sensitive = logical()),
     window = list(first_week = as.Date(NA), last_week = as.Date(NA)))
   if (!is.data.frame(daily)) stop("adaptation_trends: daily muss ein data.frame sein")
   if (!"date" %in% names(daily)) stop("adaptation_trends: Spalte 'date' fehlt in daily")
@@ -263,30 +294,24 @@ adaptation_trends <- function(daily, weeks = 12, min_days = 4, min_weeks = 6, ma
   if (length(full) == 0) return(empty)
   last_wk <- max(full); first_wk <- last_wk - 7 * (weeks - 1)
   d$ann <- if ("ann_note" %in% names(d)) !is.na(d$ann_note) else FALSE
-  d <- d[d$week >= first_wk & d$week <= last_wk, ]
+  d <- d[d$week <= last_wk, ]
   weekly <- list(); trend <- list()
   for (i in seq_len(nrow(TREND_METRICS))) {
     m <- TREND_METRICS$col[i]
     if (!m %in% names(d)) next
     v <- d[[m]]; v[d$partial] <- NA
-    if (TREND_METRICS$log[i]) v <- ifelse(!is.na(v) & v > 0, log(v), NA_real_)
-    wk <- d |> dplyr::mutate(v = v) |> dplyr::group_by(week) |>
-      dplyr::summarise(n = sum(!is.na(v)), m = mean(v, na.rm = TRUE), ann = sum(ann) / 7, .groups = "drop") |>
-      dplyr::filter(n >= min_days, ann < max_ann_share)
-    bk <- if (TREND_METRICS$log[i]) exp else identity
-    row <- list(metric = m, slope_unit = TREND_METRICS$unit[i], slope = NA_real_, lo = NA_real_, hi = NA_real_,
-                n_weeks = nrow(wk), verdict = "zu wenig Daten")
-    fit <- rep(NA_real_, nrow(wk))
-    if (nrow(wk) >= min_weeks) {
-      x <- as.numeric(wk$week - first_wk) / 7
-      f <- stats::lm(wk$m ~ x); ci <- stats::confint(f)["x", ]; b <- unname(coef(f)["x"])
-      tf <- if (TREND_METRICS$log[i]) function(z) 100 * (exp(z) - 1) else identity
-      row[c("slope", "lo", "hi")] <- list(tf(b), tf(unname(ci[1])), tf(unname(ci[2])))
-      row$verdict <- if (ci[1] > 0) "steigend" else if (ci[2] < 0) "fallend" else "kein klarer Trend"
-      fit <- bk(unname(stats::fitted(f)))
-    }
-    trend[[m]] <- tibble::as_tibble(row)
-    weekly[[m]] <- tibble::tibble(metric = m, week = wk$week, value = bk(wk$m), n_days = as.integer(wk$n), fit = fit)
+    is_log <- TREND_METRICS$log[i]
+    if (is_log) v <- ifelse(!is.na(v) & v > 0, log(v), NA_real_)
+    wk_all <- weekly_means(d, v, min_days, max_ann_share)
+    wk <- wk_all[wk_all$week >= first_wk, ]
+    a <- trend_fit(wk_all, if (nrow(wk_all)) min(wk_all$week) else first_wk, is_log, min_weeks, at = wk$week)
+    w <- trend_fit(wk, first_wk, is_log, min_weeks)
+    bk <- if (is_log) exp else identity
+    sens <- !is.na(w$slope) && !is.na(a$slope) && w$verdict != a$verdict
+    trend[[m]] <- tibble::tibble(metric = m, slope_unit = TREND_METRICS$unit[i], slope = w$slope, lo = w$lo, hi = w$hi,
+                                 n_weeks = as.integer(w$n_weeks), verdict = w$verdict, slope_all = a$slope, lo_all = a$lo,
+                                 hi_all = a$hi, n_weeks_all = as.integer(a$n_weeks), verdict_all = a$verdict, window_sensitive = sens)
+    weekly[[m]] <- tibble::tibble(metric = m, week = wk$week, value = bk(wk$m), n_days = as.integer(wk$n), fit = w$fit, fit_all = a$fit)
   }
   if (length(trend) == 0) return(empty)
   list(weekly = dplyr::bind_rows(weekly), trend = dplyr::bind_rows(trend),

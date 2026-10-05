@@ -120,8 +120,8 @@ weights <- if (!is.null(weight_raw)) weight_raw |>
 
 trends <- adaptation_trends(daily_raw |> mutate(date = as.Date(date)))   # Wochentrend der letzten 12 Wochen (festes Fenster)
 trends_payload <- list(
-  weekly = trends$weekly |> transmute(metric, week = format(week), value = round(value, 2), n_days, fit = round(fit, 2)),
-  trend  = trends$trend |> mutate(across(c(slope, lo, hi), ~ round(.x, 3))),
+  weekly = trends$weekly |> transmute(metric, week = format(week), value = round(value, 2), n_days, fit = round(fit, 2), fit_all = round(fit_all, 2)),
+  trend  = trends$trend |> mutate(across(c(slope, lo, hi, slope_all, lo_all, hi_all), ~ round(.x, 3))),
   first_week = format(trends$window$first_week), last_week = format(trends$window$last_week))
 
 wx_fx <- if (nrow(wx_raw) > 0) weather_effects(daily_raw) else weather_effects_empty()   # Tag-Ebene, ohne annotierte Zeiträume
@@ -202,9 +202,8 @@ if (peak$n_peak < peak$n_hr) message(sprintf("  Pulskurve für %d von %d Einheit
 message(sprintf("Letzte 14 Tage: %d Tage mit Erholungs-Index <= %.1f, ACWR aktuell %.2f",
                 sum(last$rec_low), REC_INDEX_THRESHOLD, tail(na.omit(dl$acwr), 1)))
 for (i in seq_len(nrow(trends$trend))) with(trends$trend[i, ],
-  message(sprintf("  Trend %-10s %+.2f %s [%+.2f; %+.2f], %d Wochen: %s", metric, slope, slope_unit, lo, hi, n_weeks, verdict)))
-if (nrow(wx_fx) > 0) for (i in seq_len(nrow(wx_fx))) with(wx_fx[i, ],
-  message(sprintf("  Temperatur %s: %+.2f %s [%+.2f; %+.2f], n = %d: %s", metric, effect, effect_unit, lo, hi, n, verdict)))
+  message(sprintf("  Trend %-10s Fenster %+.2f %s [%+.2f; %+.2f] (%d Wochen, %s) | alle %+.2f [%+.2f; %+.2f] (%d Wochen, %s)%s", metric, slope, slope_unit, lo, hi,
+                  n_weeks, verdict, slope_all, lo_all, hi_all, n_weeks_all, verdict_all, if (window_sensitive) "  -> HÄNGT VOM FENSTER AB" else "")))
 message(sprintf("Aufbau/Ermüdung heute: Fitness %.1f, Ermüdung %.1f, Form %.1f (Fitness je nach Behandlung unbekannter Tage %.1f bis %.1f)",
                 tail(dl$ctl, 1), tail(dl$atl, 1), tail(dl$tsb, 1), min(pmc_sens$ctl), max(pmc_sens$ctl)))
 message(sprintf("  Die vier Erholungs-Signale entsprechen %.1f unabhängigen (Korrelation Schlaf-Score/Body Battery %.2f).",
