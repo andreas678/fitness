@@ -70,5 +70,7 @@ test_that("is_ride_type: nur der Garmin-Typ cycling gilt als Radfahrt im engen S
   expect_equal(is_ride_type(c("cycling", "hiit", "indoor_cycling", NA)), c(TRUE, FALSE, FALSE, FALSE))
   # activity_group ordnet breiter zu: solche Fahrten zählen als "Rad", werden aber nicht zusammengefasst
   expect_equal(activity_group(c("cycling", "indoor_cycling", "mountain_biking")), rep("Rad", 3))
-  expect_false(any(activity_group(c("e_bike_fitness", "e_bike_mountain")) == "Rad"))   # E-Bike-Typen treffen die Regex nicht
+  expect_equal(activity_group(c("e_bike_fitness", "e_bike_mountain")), c("Rad", "Rad"))   # E-Bikes zählen als Rad (vor der Regex fitness)
+  expect_equal(is_ride_type(c("e_bike_fitness", "e_bike_mountain")), c(FALSE, FALSE))      # aber nicht als Radfahrt im engen Sinn
+  expect_equal(activity_group(c("hiit", "strength_training", "fitness_equipment", "running")), c("Gym / HIIT", "Gym / HIIT", "Gym / HIIT", "Laufen"))   # andere Zuordnungen bleiben
 })
