@@ -249,6 +249,10 @@ adaptation_trends <- function(daily, weeks = 12, min_days = 4, min_weeks = 6, ma
     trend = tibble::tibble(metric = character(), slope_unit = character(), slope = numeric(), lo = numeric(),
                            hi = numeric(), n_weeks = integer(), verdict = character()),
     window = list(first_week = as.Date(NA), last_week = as.Date(NA)))
+  if (!is.data.frame(daily)) stop("adaptation_trends: daily muss ein data.frame sein")
+  if (!"date" %in% names(daily)) stop("adaptation_trends: Spalte 'date' fehlt in daily")
+  if (!(is.numeric(weeks) && weeks >= 2)) stop("adaptation_trends: weeks muss mindestens 2 sein")
+  if (!(is.numeric(min_days) && min_days >= 1 && min_days <= 7)) stop("adaptation_trends: min_days muss zwischen 1 und 7 liegen")
   if (nrow(daily) == 0) return(empty)
   d <- clean_daily(daily, today = today)
   d$date <- as.Date(d$date)

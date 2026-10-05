@@ -88,3 +88,10 @@ test_that("adaptation_trends: fehlende Spalten und leere Daten lassen den Lauf n
   e <- adaptation_trends(d[0, ], today = TODAY)
   expect_equal(nrow(e$trend), 0); expect_equal(nrow(e$weekly), 0)
 })
+
+test_that("adaptation_trends prüft die Eingaben mit verständlichen Meldungen", {
+  expect_error(adaptation_trends(mk_tr()[, c("steps", "resting_hr")], today = TODAY), "date")
+  expect_error(adaptation_trends(mk_tr(), weeks = 1, today = TODAY), "weeks")
+  expect_error(adaptation_trends(mk_tr(), min_days = 0, today = TODAY), "min_days")
+  expect_error(adaptation_trends("kein Datensatz", today = TODAY), "data.frame")
+})

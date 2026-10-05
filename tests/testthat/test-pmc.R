@@ -80,3 +80,16 @@ test_that("daily_load_recovery liefert ctl/atl/tsb und markiert unbekannte Last"
   expect_false(any(dl$pmc_gap[!gap]))
   expect_false(anyNA(dl$ctl))
 })
+
+test_that("fitness_fatigue prüft die Eingaben mit verständlichen Meldungen", {
+  expect_error(fitness_fatigue(rep(50, 10), rep(TRUE, 9)), "gleich lang")
+  expect_error(fitness_fatigue(rep(50, 10), rep(TRUE, 10), tau_fat = 0), "tau")
+  expect_error(fitness_fatigue(rep(50, 10), rep(TRUE, 10), init_days = -1), "init_days")
+  expect_error(fitness_fatigue("a", TRUE), "numerisch")
+})
+
+test_that("fitness_fatigue behandelt NA in usable wie 'nicht nutzbar'", {
+  u <- rep(TRUE, 20); u[5] <- NA
+  r <- fitness_fatigue(rep(50, 20), u, init_days = 0)
+  expect_true(r$pmc_gap[5]); expect_equal(r$ctl[5], r$ctl[4])
+})

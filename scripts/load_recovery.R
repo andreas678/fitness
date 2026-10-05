@@ -188,6 +188,12 @@ roll_apply <- function(x, k, fun, min_n, lag_by = 0) {
 # nicht (eingefroren, pmc_gap = TRUE); sie werden nicht als Last 0 gerechnet. Start: Mittel der ersten
 # init_days nutzbaren Tage (init_days = 0: Start bei 0), die ersten tau_fit Tage gelten als Einschwingphase.
 fitness_fatigue <- function(load, usable, tau_fit = 42, tau_fat = 7, init_days = 14) {
+  if (!is.numeric(load)) stop("fitness_fatigue: load muss numerisch sein (Tageslast, NA erlaubt)")
+  if (length(usable) != length(load))
+    stop(sprintf("fitness_fatigue: load (%d) und usable (%d) müssen gleich lang sein", length(load), length(usable)))
+  if (!(is.numeric(tau_fit) && is.numeric(tau_fat) && tau_fit > 0 && tau_fat > 0)) stop("fitness_fatigue: tau_fit und tau_fat müssen positiv sein")
+  if (!(is.numeric(init_days) && init_days >= 0)) stop("fitness_fatigue: init_days muss 0 oder größer sein")
+  usable <- !is.na(usable) & usable                          # NA = nicht nutzbar
   n <- length(load)
   out <- tibble(ctl = rep(NA_real_, n), atl = NA_real_, tsb = NA_real_,
                 pmc_gap = !usable, pmc_warmup = seq_len(n) <= tau_fit)
