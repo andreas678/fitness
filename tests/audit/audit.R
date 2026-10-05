@@ -30,7 +30,7 @@ cat("Anteil load_est an load:",sum(dl$load_est,na.rm=T)/sum(dl$load,na.rm=T),"\n
 cat("\nflags dist:\n"); print(table(dl$flags,useNA="a"))
 cat("Signal-Raten:",colMeans(dl[,c("sig_rhr","sig_sleep","sig_bb","sig_hrv")],na.rm=T),"\n")
 cat("rhr_z NA:",sum(is.na(dl$rhr_z)),"hrv_z NA:",sum(is.na(dl$hrv_z)),"\n")
-r <- recovery_summary(dl); print(as.data.frame(r))
+r <- recovery_model(recovery_data(dl)); print(as.data.frame(r))
 cat("hiit Tage:",sum(dl$hiit),"\n")
 # autokorr/ ties: p-value multiplicity
 cat("p<0.05 count:",sum(r$p<0.05),"of",nrow(r),"\n")

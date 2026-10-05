@@ -38,7 +38,8 @@ header h1 { font-size: 20px; font-weight: 600; }
 .kpi .d { font-size: 12px; font-weight: 500; min-height: 18px; color: var(--neutral); }
 .kpi .d.good { color: var(--good); } .kpi .d.bad { color: var(--bad); }
 .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: var(--gap); margin-bottom: var(--gap); }
-.card { background: var(--card); border-radius: var(--radius); padding: 18px 22px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.card { background: var(--card); border-radius: var(--radius); padding: 18px 22px; box-shadow: 0 1px 3px rgba(0,0,0,.08); min-width: 0; }   /* min-width: breite Tabellen blähen das Raster nicht auf */
+.mini-wrap { overflow-x: auto; }
 .card h3 { font-size: 14px; font-weight: 600; }
 .card .sub { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .chartbox { position: relative; height: 260px; }
@@ -437,8 +438,8 @@ function renderRecovery() {
   const design = D.map(r => `${WD[r.wd - 1]} ${r.n_hiit}/${r.n_other}`).join(" · ");
   document.getElementById("recovery-card").innerHTML = `<h3>Erholung nach HIIT-Tagen</h3>
     <div class="sub">Werte am Morgen nach einem HIIT-Tag im Vergleich zu den übrigen Tagen, adjustiert für den Wochentag der Messung (gesamte Datenbasis)</div>
-    <table class="mini"><thead><tr><th>Kennwert</th><th>Nach HIIT</th><th>Sonst</th><th>Diff. roh</th><th>Diff. adjustiert [95 %-KI]</th><th>d</th><th>p (Holm)</th></tr></thead><tbody>${rows}</tbody></table>
-    ${both.length ? `<details class="note"><summary>Sensitivität: nur Messtage mit Vergleichsgruppe (${both.join(", ")})</summary><table class="mini"><thead><tr><th>Kennwert</th><th>Diff. adjustiert [95 %-KI]</th></tr></thead><tbody>${restricted}</tbody></table></details>` : ""}
+    <div class="mini-wrap"><table class="mini"><thead><tr><th>Kennwert</th><th>Nach HIIT</th><th>Sonst</th><th>Diff. roh</th><th>Diff. adjustiert [95 %-KI]</th><th>d</th><th>p (Holm)</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${both.length ? `<details class="note"><summary>Sensitivität: nur Messtage mit Vergleichsgruppe (${both.join(", ")})</summary><div class="mini-wrap"><table class="mini"><thead><tr><th>Kennwert</th><th>Diff. adjustiert [95 %-KI]</th></tr></thead><tbody>${restricted}</tbody></table></div></details>` : ""}
     <div class="note ${both.length < 3 ? "warn" : ""}">Messtage (HIIT-Folgetage / andere): ${design}. Nur ${both.length} von 7 Wochentagen haben beide Gruppen (je mindestens 3 Tage); darauf stützt sich die Adjustierung.</div>
     <div class="note">Ein roher Vergleich wäre verzerrt, weil HIIT auf wenigen Wochentagen liegt und der Wochentag die Werte beeinflusst (z. B. Wochenende). Diff. adjustiert: Unterschied bei gleichem Wochentag, Konfidenzintervall mit Newey-West-Standardfehlern (robust gegen Autokorrelation der Tageswerte), p nach Holm über die ${RECOVERY.filter(r => r.independent).length} unabhängigen Kennwerte, d = standardisierte Effektgröße. Ein Zusammenhang, kein Beweis. ${RECOVERY[0].n_hiit} HIIT- gegen ${RECOVERY[0].n_other} andere Tage; Zeiträume ohne Aufzeichnung und Nächte unter ${MIN_SLEEP_H} h sind ausgeschlossen.</div>
     <div class="note">* Die Training Readiness enthält Garmins eigene Last und Erholungszeit. Sie ist nicht unabhängig vom Training und wird nicht auf Signifikanz bewertet.</div>`;
@@ -460,7 +461,7 @@ function renderZones() {
   const diff = G ? ` Dein HFmax-Wert: ${P.hrmax} bpm (${P.hrmax_source}); Garmin nutzt ${G.hrmax} bpm. Die Garmin-Zonen (Prozent von Garmins HFmax) und die Karvonen-Zonen (Herzfrequenzreserve) sind zwei verschiedene Systeme; die Belastung (TRIMP) nutzt die Herzfrequenzreserve mit deinem HFmax-Wert.` : "";
   document.getElementById("zones-card").innerHTML = `<h3>Herzfrequenz-Zonen</h3>
     <div class="sub">Alter ${P.age}, Ruhe-HF ${P.rhr_ref} bpm. ${G ? "Minuten im ausgewählten Zeitraum" : "Einheiten im Zeitraum"}</div>
-    <table class="mini"><thead><tr><th>Zone</th><th>bpm</th><th>${G ? "Minuten" : "Einheiten"}</th><th>Anteil</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="mini-wrap"><table class="mini"><thead><tr><th>Zone</th><th>bpm</th><th>${G ? "Minuten" : "Einheiten"}</th><th>Anteil</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="note">${note1}${diff}</div>
     <div class="note ${hrLow ? "warn" : ""}">${P.n_peak > 0
       ? `${P.n_exceed} von ${P.n_peak} Einheiten mit Pulskurve (${pct} %) hatten eine 30-Sekunden-Spitze über dem HFmax-Wert (${P.hrmax} bpm), höchster Wert ${nf(P.obs_max)} bpm.` +

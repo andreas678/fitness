@@ -27,7 +27,7 @@ cat("\n--- HIIT-Effekt: Autokorrelation (lag1) der Differenz-Metriken\n")
 x <- dl$sleep_score; print(acf(x,plot=F,na.action=na.pass,lag.max=3)$acf[2:4])
 x <- dl$hrv_night; print(acf(x,plot=F,na.action=na.pass,lag.max=3)$acf[2:4])
 cat("\n--- Perm-Test: Cluster/Autokorr-robust? Block-Bootstrap CI fuer Diff Schlaf-Score\n")
-rs <- recovery_summary(dl)
+rs <- recovery_model(recovery_data(dl))
 # Wilcoxon + Cohen d + Bonferroni
 d2 <- dl|>mutate(sleep_ok=!is.na(sleep_h)&sleep_h>=5)
 nx <- tibble(date=d2$date-1,ss=ifelse(d2$sleep_ok,d2$sleep_score,NA),rd=d2$ready_score,hv=ifelse(d2$sleep_ok,d2$hrv_night,NA),rh=ifelse(d2$resting_hr>=45,d2$resting_hr,NA))
