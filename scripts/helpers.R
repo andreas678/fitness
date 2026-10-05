@@ -22,6 +22,50 @@ GROUP_COLORS <- c(
   "Sonstiges"       = "#999999"
 )
 
+# ---- Datendateien und ihre Leser --------------------------------------------------------------
+# Einzige Stelle für Pfade und Spaltentypen der CSV-Dateien in data/. garmin_fitness.R und weather.R schreiben,
+# build_dashboard.R und update_weather.R lesen über diese Funktionen. Fehlt die Datei, geben die Leser NULL zurück
+# (read_weather_cache in weather.R: eine leere Tabelle); wer die Datei braucht, bricht selbst mit einer Meldung ab.
+DIR_DATA <- here::here("data")
+F_DAILY   <- file.path(DIR_DATA, "garmin_daily.csv")
+F_ACT     <- file.path(DIR_DATA, "garmin_activities.csv")
+F_WEIGHT  <- file.path(DIR_DATA, "garmin_weight.csv")
+F_ZONES   <- file.path(DIR_DATA, "garmin_activity_zones.csv")
+F_HR      <- file.path(DIR_DATA, "garmin_activity_hr.csv")
+F_WEATHER <- file.path(DIR_DATA, "weather.csv")
+
+read_daily_cache <- function(path = F_DAILY) {
+  if (!file.exists(path)) return(NULL)
+  # Textspalten fest typisieren: read_csv würde "2026-10-01 22:44" sonst als Datum/Zeit lesen
+  readr::read_csv(path, show_col_types = FALSE,
+                  col_types = readr::cols(.default = readr::col_guess(), sleep_start = readr::col_character(),
+                                          sleep_end = readr::col_character(), hrv_status = readr::col_character(),
+                                          ready_level = readr::col_character(), ts_status = readr::col_character())) |>
+    mutate(date = as.Date(date))
+}
+read_act_cache <- function(path = F_ACT) {
+  if (!file.exists(path)) return(NULL)
+  readr::read_csv(path, show_col_types = FALSE,
+                  col_types = readr::cols(activity_id = readr::col_character(),
+                                          start = readr::col_datetime(), name = readr::col_character(),
+                                          type_key = readr::col_character(), .default = readr::col_double()))
+}
+read_weight_cache <- function(path = F_WEIGHT) {
+  if (!file.exists(path)) return(NULL)
+  readr::read_csv(path, show_col_types = FALSE)
+}
+# Zonen und Spitzenpuls je Aktivität: activity_id als Text, alles andere Zahlen
+read_zones_cache <- function(path = F_ZONES) {
+  if (!file.exists(path)) return(NULL)
+  readr::read_csv(path, show_col_types = FALSE,
+                  col_types = readr::cols(activity_id = readr::col_character(), .default = readr::col_double()))
+}
+read_hr_cache <- function(path = F_HR) {
+  if (!file.exists(path)) return(NULL)
+  readr::read_csv(path, show_col_types = FALSE,
+                  col_types = readr::cols(activity_id = readr::col_character(), .default = readr::col_double()))
+}
+
 # Aktivitätstyp (Garmin typeKey) -> Gruppe
 activity_group <- function(type) {
   type <- tolower(as.character(type))

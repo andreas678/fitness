@@ -93,3 +93,50 @@ test_that("META-Teil aus Konstanten wird als JSON-Objekt serialisiert (nicht als
   expect_equal(names(j$acwr), c("low", "high", "very_high"))
   expect_equal(j$acwr$low, ACWR_LOW)
 })
+
+# ---- CSV-Leser (Pfade und Spaltentypen an einer Stelle) -----------------------------------------
+test_that("Pfade der Datendateien liegen alle in data/", {
+  for (f in c(F_DAILY, F_ACT, F_WEIGHT, F_ZONES, F_HR, F_WEATHER)) expect_equal(dirname(f), DIR_DATA)
+  expect_equal(basename(c(F_DAILY, F_ACT, F_WEIGHT, F_ZONES, F_HR, F_WEATHER)),
+               c("garmin_daily.csv", "garmin_activities.csv", "garmin_weight.csv",
+                 "garmin_activity_zones.csv", "garmin_activity_hr.csv", "weather.csv"))
+})
+
+test_that("Leser geben NULL zurück, wenn die Datei fehlt", {
+  nf <- file.path(tempdir(), "gibt-es-nicht.csv")
+  for (rd in list(read_daily_cache, read_act_cache, read_weight_cache, read_zones_cache, read_hr_cache))
+    expect_null(rd(nf))
+})
+
+test_that("read_daily_cache liest Textspalten als Text und date als Datum", {
+  f <- tempfile(fileext = ".csv")
+  readr::write_csv(tibble(date = as.Date("2026-10-01") + 0:1, steps = c(8000, 9000),
+                          sleep_start = c("2026-09-30 22:44", NA), sleep_end = c("2026-10-01 06:30", NA),
+                          hrv_status = c("BALANCED", NA), ready_level = c("MODERATE", NA), ts_status = c("PRODUCTIVE", NA)), f)
+  d <- read_daily_cache(f)
+  expect_s3_class(d$date, "Date")
+  expect_type(d$sleep_start, "character")           # sonst würde readr "2026-09-30 22:44" als Datum/Zeit lesen
+  expect_equal(d$sleep_start[1], "2026-09-30 22:44")
+  expect_type(d$sleep_end, "character")
+  expect_true(is.numeric(d$steps))
+})
+
+test_that("read_act_cache, read_zones_cache und read_hr_cache halten activity_id als Text", {
+  # Garmin-IDs sind zu groß für 32-Bit-Zahlen; als Zahl gelesen gingen Stellen verloren
+  f1 <- tempfile(fileext = ".csv"); f2 <- tempfile(fileext = ".csv"); f3 <- tempfile(fileext = ".csv")
+  readr::write_csv(tibble(activity_id = "12345678901234", start = as.POSIXct("2026-10-01 07:30:00", tz = "UTC"),
+                          name = "x", type_key = "cycling", distance_km = 14, duration_min = 42), f1)
+  readr::write_csv(tibble(activity_id = "12345678901234", z1_s = 60, z1_low = 95), f2)
+  readr::write_csv(tibble(activity_id = "12345678901234", hr_peak30 = 151, n_samples = 2400), f3)
+  a <- read_act_cache(f1); z <- read_zones_cache(f2); h <- read_hr_cache(f3)
+  expect_equal(a$activity_id, "12345678901234"); expect_s3_class(a$start, "POSIXct")
+  expect_equal(z$activity_id, "12345678901234"); expect_true(is.numeric(z$z1_s))
+  expect_equal(h$activity_id, "12345678901234"); expect_equal(h$hr_peak30, 151)
+})
+
+test_that("read_weight_cache liest die Wiegungen", {
+  f <- tempfile(fileext = ".csv")
+  readr::write_csv(tibble(date = as.Date("2026-10-01") + 0:2, weight_kg = c(89.4, 89.1, 89.6)), f)
+  w <- read_weight_cache(f)
+  expect_equal(nrow(w), 3); expect_s3_class(w$date, "Date"); expect_equal(w$weight_kg[2], 89.1)
+})

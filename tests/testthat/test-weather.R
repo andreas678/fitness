@@ -111,3 +111,14 @@ test_that("weather_effects korrigiert die p-Werte nach Holm und urteilt auf dies
   d <- mk_wx(effect = 0, seed = 5); r0 <- weather_effects(d, today = TODAY)
   expect_true(all(r0$verdict[r0$p_holm >= 0.05] == "kein klarer Zusammenhang"))
 })
+
+test_that("read_weather_cache liefert ohne Datei eine leere Tabelle und liest sonst Datum und Zahlen", {
+  nf <- file.path(tempdir(), "weather-gibt-es-nicht.csv")
+  e <- read_weather_cache(nf)
+  expect_equal(nrow(e), 0); expect_equal(names(e), c("date", "tmax", "tmin", "tmean"))
+  f <- tempfile(fileext = ".csv")
+  readr::write_csv(tibble::tibble(date = as.Date("2026-07-01") + 0:1, tmax = c(31.2, 24), tmin = c(18, 15), tmean = c(24, 19)), f)
+  w <- read_weather_cache(f)
+  expect_s3_class(w$date, "Date"); expect_equal(w$tmax, c(31.2, 24))
+  expect_equal(F_WEATHER, file.path(DIR_DATA, "weather.csv"))
+})

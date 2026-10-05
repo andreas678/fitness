@@ -113,7 +113,7 @@ scripts/
   garmin_fitness.R         Abruf, Cache, Plausibilitätsprüfung
   build_dashboard.R        HTML-Dashboard bauen
   dashboard_template.html  Vorlage (Chart.js, Auswertung im Browser)
-  helpers.R                gemeinsame Funktionen und Konstanten fürs Dashboard (Bereinigung, Annotationen, Referenzen, Prüfungen, Gewichts- und Anpassungstrends)
+  helpers.R                gemeinsame Funktionen und Konstanten fürs Dashboard, CSV-Leser (Pfade und Spaltentypen), Bereinigung, Annotationen, Referenzen, Prüfungen, Gewichts- und Anpassungstrends
   load_recovery.R          Profil, TRIMP, ACWR, Fitness/Ermüdung, Baselines, Erholungs-Index, Erholungsmodell
   weather.R                Tagestemperaturen (Abruf, Cache) und Zusammenhang mit den Tageswerten
   update_weather.R         Tagestemperaturen allein nachladen
