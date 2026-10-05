@@ -99,8 +99,8 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
 
   <h2 class="sect">Belastung &amp; Erholung</h2>
   <section class="charts">
-    <div class="card"><h3>Trainingsbelastung pro Tag</h3><div class="sub">TRIMP aus Durchschnittspuls und Dauer. Linien: Ø Tageslast der letzten 7 bzw. 28 Tage. Zeiträume ohne Aufzeichnung bleiben leer</div><div class="chartbox"><canvas id="c-load"></canvas></div></div>
-    <div class="card"><h3>Akut-/Chronisch-Verhältnis (ACWR)</h3><div class="sub">7-Tage- zu 28-Tage-Last. Grüner Bereich 0,8–1,3 ist nur ein grober Richtwert</div><div class="chartbox"><canvas id="c-acwr"></canvas></div></div>
+    <div class="card"><h3>Trainingsbelastung pro Tag</h3><div class="sub">TRIMP aus Durchschnittspuls und Dauer. Linien: Ø Tageslast der letzten 7 bzw. 28 Tage. Zeiträume ohne Aufzeichnung bleiben leer</div><div class="chartbox"><canvas id="c-load"></canvas></div><div class="note" id="load-note"></div></div>
+    <div class="card"><h3>Akut-/Chronisch-Verhältnis (ACWR)</h3><div class="sub">7-Tage- zu 28-Tage-Last. Grüner Bereich 0,8–1,3 ist nur ein grober Richtwert. Rosa gestrichelt: nur gemessene Last, ohne die geschätzten Pendelfahrten</div><div class="chartbox"><canvas id="c-acwr"></canvas></div></div>
     <div class="card"><h3>Ruhepuls gegen persönliche Baseline</h3><div class="sub">Band: Ø der 28 Vortage ± 1,5 Standardabweichungen, rote Punkte: deutlich erhöht</div><div class="chartbox"><canvas id="c-rhrbase"></canvas></div></div>
     <div class="card"><h3>Erholungs-Signale pro Tag</h3><div class="sub">Zählt: Ruhepuls erhöht, Schlaf-Score niedrig, Body-Battery-Höchstwert niedrig, HRV niedrig (je gegen die eigene 28-Tage-Baseline)</div><div class="chartbox"><canvas id="c-flags"></canvas></div></div>
     <div class="card" id="recovery-card"></div>
@@ -296,13 +296,14 @@ function makeCharts() {
       { type: "line", label: "Chronisch (28 Tage Ø)", data: [], borderColor: "#1F4E79", borderWidth: 2.5, pointRadius: 0, tension: .25, stack: "chronic", order: 2 }] },
     options: baseOpts({ scales: { x: gridX(true), y: { stacked: true, grid: { color: css("--grid") }, title: { display: true, text: "TRIMP / Tag" } } },
       plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 0)}` } } } }) });
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 0)}`, footer: dayFooter } } } }) });
   mk("c-acwr", { type: "line", data: { labels: [], datasets: [
       { label: "Untergrenze 0,8", data: [], borderWidth: 0, pointRadius: 0 },
       { label: "Richtbereich 0,8–1,3", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#009E7335", fill: "-1" },
       { label: "ACWR (eigene Berechnung)", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25 },
-      { label: "ACWR (Garmin)", data: [], borderColor: "#888", borderDash: [5, 4], borderWidth: 1.8, pointRadius: 0, tension: .25 }] },
-    options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze 0,8"]), { tooltip: { filter: i => i.dataset.label.startsWith("ACWR"), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 2)}` } } }),
+      { label: "ACWR (Garmin)", data: [], borderColor: "#888", borderDash: [5, 4], borderWidth: 1.8, pointRadius: 0, tension: .25 },
+      { label: "ACWR (nur gemessene Last)", data: [], borderColor: "#CC79A7", borderDash: [2, 3], borderWidth: 1.8, pointRadius: 0, tension: .25 }] },
+    options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze 0,8"]), { tooltip: { filter: i => i.dataset.label.startsWith("ACWR"), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 2)}`, footer: dayFooter } } }),
       scales: { x: gridX(false), y: { min: 0, grid: { color: css("--grid") } } } }) });
   mk("c-rhrbase", { type: "line", data: { labels: [], datasets: [
       { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0 },
@@ -352,11 +353,26 @@ function setData(id, labels, sets) {
   c.update("none");
 }
 let flagRows = [], readyRows = [], dayRows = [];
+const dayNote = r => !r ? "" : r.load_unknown ? "Last unbekannt" + (r.ann_note ? ": " + r.ann_note : " (Uhr getragen, nichts aufgezeichnet)")
+  : r.no_wear ? "Uhr vermutlich nicht getragen" : r.ann_note ? r.ann_note : r.partial ? "unvollständiger Tag" : "";
+const dayFooter = items => dayNote(dayRows[items[0].dataIndex]);
 const FLAG_COLORS = ["#00000000", "#E69F00", "#D55E00", "#B3261E", "#7A1712"];
+function renderLoadNote(d) {
+  const lo = d.length ? d[0].t : minT, hi = d.length ? d[d.length - 1].t : maxT, C = META.commute || {};
+  const inR = ACTS.filter(a => inRange(actT(a), lo, hi) && a.trimp != null);
+  const tot = sum(inR.map(a => a.trimp)), est = sum(inR.filter(a => a.est).map(a => a.trimp));
+  const nUnk = d.filter(r => r.load_unknown).length, nOff = d.filter(r => r.no_wear).length;
+  document.getElementById("load-note").textContent =
+    `Geschätzter Anteil der Last im Zeitraum: ${tot ? nf(est / tot * 100) : "–"} %. Pendelfahrten ohne Puls zählen mit ${nf(META.commute_hrr * 100)} % der Herzfrequenzreserve (` +
+    (C.source === "abgeleitet" ? `Median aus ${C.n} gemessenen Fahrten, Spannweite ${nf(C.lo * 100)}–${nf(C.hi * 100)} %` : "Annahme") + `).` +
+    (nUnk ? ` ${nUnk} Tage mit unbekannter Last (Uhr getragen, nichts aufgezeichnet).` : "") +
+    (nOff ? ` ${nOff} Tage ohne getragene Uhr.` : "");
+}
 function updateLoadCharts(d, L) {
   const un = r => r.unrecorded ? null : undefined;
   setData("c-load", L, [d.map(r => r.load_meas), d.map(r => r.load_est), d.map(r => r.acute_d), d.map(r => r.chronic_d)]);
-  setData("c-acwr", L, [d.map(() => 0.8), d.map(() => 1.3), d.map(r => r.acwr), d.map(r => r.ts_acwr)]);
+  setData("c-acwr", L, [d.map(() => 0.8), d.map(() => 1.3), d.map(r => r.acwr), d.map(r => r.ts_acwr), d.map(r => r.acwr_meas)]);
+  renderLoadNote(d);
   const rh = r => r.resting_hr;                             // Artefakte sind in prepDaily schon entfernt
   setData("c-rhrbase", L, [d.map(r => r.rhr_lo), d.map(r => r.rhr_hi), d.map(r => r.rhr_base), d.map(rh)]);
   const c = charts["c-rhrbase"]; c.data.datasets[3].pointBackgroundColor = d.map(r => r.sig_rhr ? "#B3261E" : "#E69F00");

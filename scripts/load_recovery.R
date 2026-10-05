@@ -72,6 +72,18 @@ zone_by_activity <- function(zt, acts) {
   out
 }
 
+# Pendel-Intensität aus den Radfahrten MIT Pulsdaten ableiten (Median der Herzfrequenzreserve).
+# Weniger als min_n gemessene Fahrten: Standardwert (Annahme). Kleine Stichprobe: die Spannweite
+# wird mit ausgegeben, damit die Unsicherheit sichtbar bleibt.
+derive_commute_hrr <- function(acts, p, default = 0.40, min_n = 5) {
+  r <- acts[acts$type_key %in% "cycling" & !is.na(acts$avg_hr), ]
+  hrr <- pmin(pmax((r$avg_hr - p$rhr_ref) / (p$hrmax - p$rhr_ref), 0), 1)
+  if (length(hrr) < min_n)
+    return(list(value = default, n = length(hrr), lo = NA_real_, hi = NA_real_, source = "Annahme"))
+  list(value = round(median(hrr), 2), n = length(hrr), lo = round(min(hrr), 2), hi = round(max(hrr), 2),
+       source = "abgeleitet")
+}
+
 session_load <- function(acts, p, commute_hrr = 0.40, zones = NULL) {
   zt <- zone_by_activity(zone_trimp(zones, p), acts)
   out <- acts |> mutate(
@@ -96,6 +108,19 @@ session_load <- function(acts, p, commute_hrr = 0.40, zones = NULL) {
   out
 }
 
+# Wie stark hängt die Gesamt-TRIMP von den Annahmen ab? Variiert HFmax und Pendel-HFR je einzeln.
+trimp_sensitivity <- function(acts, p, commute_hrr, zones = NULL, hrmax_delta = c(-10, 0, 10),
+                              commute = c(0.3, commute_hrr, 0.5)) {
+  run <- function(pp, ch) {
+    s <- session_load(acts, pp, ch, zones)
+    tibble(trimp_total = sum(s$trimp, na.rm = TRUE), share_est = sum(s$trimp[s$est], na.rm = TRUE) / sum(s$trimp, na.rm = TRUE))
+  }
+  hm <- bind_rows(lapply(hrmax_delta, function(dl) { pp <- p; pp$hrmax <- p$hrmax + dl
+    bind_cols(tibble(parameter = "HFmax", value = pp$hrmax), run(pp, commute_hrr)) }))
+  cm <- bind_rows(lapply(commute, function(ch) bind_cols(tibble(parameter = "Pendel-HFR", value = ch), run(p, ch))))
+  bind_rows(hm, cm)
+}
+
 # ---- Tageswerte: Last, ACWR, Baselines, Erholungs-Signale -------------------------------
 roll_apply <- function(x, k, fun, min_n, lag_by = 0) {
   vapply(seq_along(x), function(i) {
@@ -117,11 +142,23 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
               hiit      = any(type_key == "hiit"), .groups = "drop")
   d <- daily |> left_join(per_day, by = "date")
 
-  # Zeiträume ohne jede Aktivität (>= min_gap_days Tage) = Uhr vermutlich nicht getragen
+  # Zeiträume ohne jede Aktivität (>= min_gap_days Tage): Last unbekannt (Uhr getragen, Schritte
+  # vorhanden) oder Uhr nicht getragen (kaum Schritte). Beide Fälle: Last = NA (nicht 0).
+  # Annotierte Zeiträume (ann_load_unknown, data/annotations.csv) zählen immer als "Last unbekannt".
   no_act <- is.na(d$load_meas)
+  worn   <- !is.na(d$steps) & d$steps >= MIN_STEPS
   r <- rle(no_act); ends <- cumsum(r$lengths); starts <- ends - r$lengths + 1
-  d$unrecorded <- FALSE
-  for (j in which(r$values & r$lengths >= min_gap_days)) d$unrecorded[starts[j]:ends[j]] <- TRUE
+  d$no_wear <- FALSE; d$load_unknown <- FALSE
+  for (j in which(r$values & r$lengths >= min_gap_days)) {
+    idx <- starts[j]:ends[j]
+    if (mean(worn[idx]) >= 0.5) d$load_unknown[idx] <- TRUE else d$no_wear[idx] <- TRUE
+  }
+  if ("ann_load_unknown" %in% names(d)) {
+    ann <- coalesce(d$ann_load_unknown, FALSE)
+    d$load_unknown <- d$load_unknown | ann
+    d$no_wear      <- d$no_wear & !ann
+  }
+  d$unrecorded <- d$no_wear | d$load_unknown      # Sammelmarke für Weiterverwendung (Last = NA)
 
   d <- d |> mutate(
     load_meas = ifelse(unrecorded, NA_real_, coalesce(load_meas, 0)),
@@ -132,7 +169,12 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
     load_acwr = ifelse(partial, NA_real_, load),
     acute_d   = roll_apply(load_acwr, 7, mean, 5),      # mittlere Tageslast, letzte 7 Tage
     chronic_d = roll_apply(load_acwr, 28, mean, 14),    # mittlere Tageslast, letzte 28 Tage
-    acwr      = ifelse(!is.na(chronic_d) & chronic_d >= 1, acute_d / chronic_d, NA_real_)
+    acwr      = ifelse(!is.na(chronic_d) & chronic_d >= 1, acute_d / chronic_d, NA_real_),
+    # Variante nur mit gemessener Last (ohne die pauschal geschätzten Pendelfahrten)
+    load_meas_acwr = ifelse(partial, NA_real_, load_meas),
+    acute_m   = roll_apply(load_meas_acwr, 7, mean, 5),
+    chronic_m = roll_apply(load_meas_acwr, 28, mean, 14),
+    acwr_meas = ifelse(!is.na(chronic_m) & chronic_m >= 1, acute_m / chronic_m, NA_real_)
   )
 
   # persönliche Baselines (28 Tage vor dem jeweiligen Tag, mind. 14 Werte), aus bereinigten Werten

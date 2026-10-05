@@ -73,6 +73,8 @@ flag_daily <- function(daily, min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR, min_
   col <- function(nm) if (nm %in% names(daily)) daily[[nm]] else rep(NA_real_, nrow(daily))
   sl <- col("sleep_h"); rhr <- col("resting_hr"); st <- col("steps")
   daily$sleep_bad <- !is.na(sl)  & sl  < min_sleep_h
+  # Annotierter Zeitraum mit "kurze Nächte sind echt" (z. B. Nachtwachen): nicht als "Uhr nicht getragen" werten
+  if ("ann_short_sleep" %in% names(daily)) daily$sleep_bad <- daily$sleep_bad & !daily$ann_short_sleep
   daily$rhr_bad   <- !is.na(rhr) & rhr < min_rhr
   daily$partial   <- as.Date(daily$date) >= today | (!is.na(st) & st < min_steps & is.na(sl))
   daily
@@ -87,4 +89,39 @@ clean_daily <- function(daily, min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR, ext
   for (cl in intersect(c(SLEEP_COLS, extra_cols), names(d))) d[[cl]][d$sleep_bad] <- NA
   if ("resting_hr" %in% names(d)) d$resting_hr[d$rhr_bad] <- NA
   d
+}
+
+# ---- Annotationen: bekannte Zeiträume beschriften (data/annotations.csv, git-ignoriert) -------------
+# Spalten: from, to (JJJJ-MM-TT), note (Text), load_unknown (TRUE = Uhr getragen, aber Trainingslast
+# nicht erfasst, z. B. Segeln ohne Aufzeichnung), short_sleep_real (TRUE = kurze Nächte sind echt,
+# z. B. Nachtwachen, und gelten nicht als "Uhr nicht getragen"). Hinweis: Garmin erfasst bei geteiltem
+# Schlaf nur die Hauptphase, die Schlafdauer ist dann eine Untergrenze.
+ANN_COLS <- c("from", "to", "note", "load_unknown", "short_sleep_real")
+
+read_annotations <- function(path = here::here("data", "annotations.csv")) {
+  empty <- tibble(from = as.Date(character()), to = as.Date(character()), note = character(),
+                  load_unknown = logical(), short_sleep_real = logical())
+  if (!file.exists(path)) return(empty)
+  raw <- readr::read_csv(path, show_col_types = FALSE, col_types = readr::cols(.default = readr::col_character()))
+  miss <- setdiff(ANN_COLS, names(raw))
+  if (length(miss)) stop("annotations.csv: Spalten fehlen: ", paste(miss, collapse = ", "))
+  out <- tibble(from = as.Date(raw$from, optional = TRUE), to = as.Date(raw$to, optional = TRUE),
+                note = raw$note,
+                load_unknown = toupper(raw$load_unknown) %in% c("TRUE", "T", "JA", "1"),
+                short_sleep_real = toupper(raw$short_sleep_real) %in% c("TRUE", "T", "JA", "1"))
+  if (anyNA(out$from) || anyNA(out$to)) stop("annotations.csv: unlesbares Datum in von/bis (Format JJJJ-MM-TT)")
+  if (any(out$from > out$to)) stop("annotations.csv: 'von' liegt nach 'bis'")
+  out
+}
+
+# Fügt je Tag ann_note, ann_load_unknown, ann_short_sleep hinzu (Überlappungen: Flags werden verodert)
+apply_annotations <- function(daily, ann) {
+  daily$ann_note <- NA_character_; daily$ann_load_unknown <- FALSE; daily$ann_short_sleep <- FALSE
+  for (i in seq_len(nrow(ann))) {
+    hit <- as.Date(daily$date) >= ann$from[i] & as.Date(daily$date) <= ann$to[i]
+    daily$ann_note[hit] <- ifelse(is.na(daily$ann_note[hit]), ann$note[i], paste(daily$ann_note[hit], ann$note[i], sep = "; "))
+    daily$ann_load_unknown[hit] <- daily$ann_load_unknown[hit] | ann$load_unknown[i]
+    daily$ann_short_sleep[hit]  <- daily$ann_short_sleep[hit]  | ann$short_sleep_real[i]
+  }
+  daily
 }

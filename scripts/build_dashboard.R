@@ -22,9 +22,11 @@ source(here("scripts", "load_recovery.R"))
 
 RIDE_GAP_MIN <- 30    # wie in garmin_fitness.R
 RIDE_MIN_MIN <- 3
-COMMUTE_HRR  <- 0.40  # Annahme für Radfahrten ohne Pulsdaten (Anteil der Herzfrequenzreserve)
 
-daily_raw <- read_csv(here("data", "garmin_daily.csv"), show_col_types = FALSE)
+ann       <- read_annotations()      # data/annotations.csv: bekannte Zeiträume (Segeln, Nachtwachen ...)
+daily_raw <- read_csv(here("data", "garmin_daily.csv"), show_col_types = FALSE) |>
+  apply_annotations(ann)
+if (nrow(ann) > 0) message(sprintf("Annotationen: %d Zeitraum/Zeiträume, %d Tage beschriftet.", nrow(ann), sum(!is.na(daily_raw$ann_note))))
 
 acts_m <- read_csv(here("data", "garmin_activities.csv"), show_col_types = FALSE,
                    col_types = cols(activity_id = col_character(), start = col_datetime(),
@@ -42,6 +44,9 @@ weight_raw <- read_opt(here("data", "garmin_weight.csv"))
 # Profil, Belastung, Erholungs-Signale (siehe load_recovery.R)
 rhr_ref <- median(clean_daily(daily_raw)$resting_hr, na.rm = TRUE)   # ohne Ruhepuls-Artefakte
 prof    <- athlete_profile(rhr_ref)
+# Pendel-Intensität (Radfahrten ohne Puls) aus den gemessenen Fahrten ableiten, sonst Annahme 0,40
+commute    <- derive_commute_hrr(acts_m, prof, default = 0.40)
+COMMUTE_HRR <- commute$value
 acts_s  <- session_load(acts_m, prof, COMMUTE_HRR, zones_raw)
 dl      <- daily_load_recovery(daily_raw, acts_s)
 recov   <- recovery_summary(dl)
@@ -59,12 +64,12 @@ daily <- dl |>
          stress_avg = ifelse(stress_avg < 0, NA, stress_avg),     # -1 = kein Wert
          bed_h = round(to_clock_h(sleep_start, TRUE), 2), wake_h = round(to_clock_h(sleep_end), 2),
          across(any_of(c("sig_rhr", "sig_sleep", "sig_bb", "sig_hrv", "unrecorded", "hiit",
-                         "sleep_bad", "rhr_bad", "partial")), as.integer),
-         across(c(load_meas, load_est, acute_d, chronic_d, acwr, rhr_base, rhr_lo, rhr_hi),
+                         "sleep_bad", "rhr_bad", "partial", "no_wear", "load_unknown")), as.integer),
+         across(c(load_meas, load_est, acute_d, chronic_d, acwr, acwr_meas, rhr_base, rhr_lo, rhr_hi),
                 ~ round(.x, 2))) |>
   select(date, steps, distance_km, resting_hr, kcal_active, intensity_min, stress_avg,
          bb_high, bb_low, sleep_h, deep_h, light_h, rem_h, awake_h, sleep_score,
-         hiit, unrecorded, load_meas, load_est, acute_d, chronic_d, acwr,
+         hiit, unrecorded, no_wear, load_unknown, ann_note, load_meas, load_est, acute_d, chronic_d, acwr, acwr_meas,
          rhr_base, rhr_lo, rhr_hi, sig_rhr, sig_sleep, sig_bb, sig_hrv, flags,
          sleep_bad, rhr_bad, partial,
          any_of(c("bed_h", "wake_h", "sleep_need_min", "sleep_hr", "sleep_stress", "awake_count",
@@ -88,6 +93,7 @@ hr_sessions <- acts_s |> filter(!is.na(max_hr))
 meta <- list(
   built = format(Sys.time(), "%d.%m.%Y %H:%M"),
   ride_gap_min = RIDE_GAP_MIN, ride_min_min = RIDE_MIN_MIN, commute_hrr = COMMUTE_HRR,
+  commute = list(n = commute$n, lo = commute$lo, hi = commute$hi, source = commute$source),
   min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR,                 # Schwellen aus helpers.R, vom Dashboard mitgenutzt
   sleep_cols = c(SLEEP_COLS, "bed_h", "wake_h"),                # bei ungültiger Nacht ausblendbar
   garmin_zones = if (!is.null(zones_raw) && nrow(zones_raw) > 0)
@@ -121,6 +127,13 @@ writeLines(html, out, useBytes = TRUE)
 last <- tail(dl, 14)
 message(sprintf("Profil: %d Jahre, HFmax %d bpm (%s), Ruhe-HF-Referenz %d bpm", prof$age,
                 prof$hrmax, prof$hrmax_source, prof$rhr_ref))
+message(sprintf("Pendel-Intensität: HFR %.2f (%s, n = %d gemessene Fahrten%s)", COMMUTE_HRR, commute$source, commute$n,
+                if (commute$source == "abgeleitet") sprintf(", Spannweite %.2f–%.2f", commute$lo, commute$hi) else ""))
+sens <- trimp_sensitivity(acts_m, prof, COMMUTE_HRR, zones_raw)
+message("Sensitivität der Gesamt-TRIMP (jeweils eine Annahme variiert):")
+for (i in seq_len(nrow(sens)))
+  message(sprintf("  %-10s %6.2f -> TRIMP %5.0f (%2.0f %% geschätzt)", sens$parameter[i], sens$value[i],
+                  sens$trimp_total[i], sens$share_est[i] * 100))
 message(sprintf("Sessions mit Max-Puls über HFmax: %d von %d (HFmax prüfen!)",
                 meta$profile$n_exceed, meta$profile$n_hr_sessions))
 message(sprintf("Letzte 14 Tage: %d Tage mit >= 2 Erholungs-Signalen, ACWR aktuell %.2f",

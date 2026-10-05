@@ -38,3 +38,79 @@ test_that("Ohne segment_ids verhält sich session_load wie bisher", {
   expect_equal(session_load(act("1", 10, 116), p, zones = zones)$trimp,
                session_load(act("1", 10, 116, ids = "1"), p, zones = zones)$trimp)
 })
+
+# ---- Pendel-Intensität, Wear-Erkennung, ACWR nur aus gemessener Last, Sensitivität -------------
+test_that("derive_commute_hrr nimmt den Median der gemessenen Fahrten, sonst den Standardwert", {
+  rides <- tibble(type_key = "cycling", avg_hr = c(113, 126, 108, 86, 113, 130))    # HFR .46 .56 .42 .25 .46 .59
+  r <- derive_commute_hrr(rides, p, default = 0.40)
+  expect_equal(r$value, 0.46); expect_equal(r$n, 6); expect_equal(r$source, "abgeleitet")
+  expect_equal(c(r$lo, r$hi), c(0.25, 0.59))
+  few <- derive_commute_hrr(rides[1:3, ], p, default = 0.40)
+  expect_equal(few$value, 0.40); expect_equal(few$source, "Annahme")
+  other <- derive_commute_hrr(bind_rows(rides, tibble(type_key = "hiit", avg_hr = 170)), p)
+  expect_equal(other$n, 6)                                            # nur Radfahrten zählen
+})
+
+# 40 Tage Daten; Aktivitäten außer in der Lücke [gap]; steps_gap steuert die Wear-Evidenz
+mk_gap <- function(gap, steps_gap, today_offset = 100) {
+  days <- as.Date("2026-01-01") + 0:39
+  daily <- tibble(date = days, steps = ifelse(seq_along(days) %in% gap, steps_gap, 8000),
+                  resting_hr = 54, sleep_h = 7, sleep_score = 80, bb_high = 80)
+  act_days <- days[!seq_along(days) %in% gap]
+  acts <- tibble(start = as.POSIXct(paste(act_days, "08:00:00"), tz = "UTC"), trimp = 50, est = FALSE,
+                 te_aerobic = NA_real_, type_key = "cycling")
+  daily_load_recovery(daily, acts)
+}
+
+test_that("Lange Lücke mit Schritten = Last unbekannt, ohne Schritte = Uhr nicht getragen", {
+  worn <- mk_gap(10:21, steps_gap = 3000)
+  expect_true(all(worn$load_unknown[10:21])); expect_false(any(worn$no_wear))
+  off <- mk_gap(10:21, steps_gap = NA_real_)
+  expect_true(all(off$no_wear[10:21])); expect_false(any(off$load_unknown))
+  expect_true(all(worn$unrecorded[10:21]) && all(off$unrecorded[10:21]))
+  expect_true(all(is.na(worn$load[10:21])))
+})
+
+test_that("Kurze Lücke bleibt Nulllast", {
+  short <- mk_gap(10:14, steps_gap = 3000)
+  expect_false(any(short$unrecorded)); expect_equal(short$load[10:14], rep(0, 5))
+})
+
+test_that("Annotation 'Last unbekannt' macht die Last NA, auch ohne lange Lücke", {
+  days <- as.Date("2026-01-01") + 0:39
+  daily <- tibble(date = days, steps = 8000, resting_hr = 54, sleep_h = 7, sleep_score = 80, bb_high = 80)
+  ann <- read_annotations(local({ f <- tempfile(fileext = ".csv")
+    writeLines(c("from,to,note,load_unknown,short_sleep_real", "2026-01-20,2026-01-23,Segeln,TRUE,FALSE"), f); f }))
+  acts <- tibble(start = as.POSIXct(paste(days, "08:00:00"), tz = "UTC"), trimp = 50, est = FALSE,
+                 te_aerobic = NA_real_, type_key = "cycling")
+  d <- daily_load_recovery(apply_annotations(daily, ann), acts)
+  idx <- which(days >= as.Date("2026-01-20") & days <= as.Date("2026-01-23"))
+  expect_true(all(d$load_unknown[idx])); expect_true(all(is.na(d$load[idx])))
+  expect_false(any(d$load_unknown[-idx]))
+})
+
+test_that("acwr_meas rechnet nur mit gemessener Last", {
+  n <- 40; days <- Sys.Date() - (n - 1):0 - 2                                    # heute ausgeschlossen
+  daily <- tibble(date = days, steps = 8000, resting_hr = 54, sleep_h = 7, sleep_score = 80, bb_high = 80)
+  acts <- bind_rows(
+    tibble(start = as.POSIXct(paste(days, "08:00:00"), tz = "UTC"), trimp = 40, est = FALSE, te_aerobic = NA_real_, type_key = "hiit"),
+    tibble(start = as.POSIXct(paste(days, "17:00:00"), tz = "UTC"), trimp = 10, est = TRUE,  te_aerobic = NA_real_, type_key = "cycling"))
+  d <- daily_load_recovery(daily, acts)
+  expect_equal(tail(d$acwr_meas, 1), 1)                                          # gleichmäßige Last
+  acts$trimp[acts$est & as.Date(acts$start) > max(days) - 7] <- 100              # nur geschätzte Last steigt
+  d2 <- daily_load_recovery(daily, acts)
+  expect_equal(tail(d2$acwr_meas, 1), 1)                                         # gemessene ACWR unverändert
+  expect_gt(tail(d2$acwr, 1), 1.2)                                               # Gesamt-ACWR steigt
+})
+
+test_that("trimp_sensitivity variiert HFmax und Pendel-HFR einzeln", {
+  acts <- bind_rows(act("1", 60, 140), act("2", 30, NA)) |> mutate(type_key = "cycling")
+  s <- trimp_sensitivity(acts, p, commute_hrr = 0.46, zones = NULL, hrmax_delta = c(-10, 0, 10), commute = c(0.3, 0.46, 0.5))
+  expect_equal(nrow(s), 6)
+  expect_true(all(c("parameter", "value", "trimp_total", "share_est") %in% names(s)))
+  hm <- s[s$parameter == "HFmax", ]
+  expect_true(hm$trimp_total[1] > hm$trimp_total[2] && hm$trimp_total[2] > hm$trimp_total[3])   # höhere HFmax = weniger TRIMP
+  cm <- s[s$parameter == "Pendel-HFR", ]
+  expect_true(all(diff(cm$trimp_total) > 0))
+  expect_true(all(s$share_est > 0 & s$share_est < 1))
+})
