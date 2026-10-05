@@ -55,8 +55,25 @@ zone_trimp <- function(zones, p) {
          z4_min = secs[, 4] / 60, z5_min = secs[, 5] / 60)
 }
 
+# Zonen-Kennwerte je Aktivität: gemergte Fahrten (segment_ids "id1;id2") summieren die Zonen
+# ihrer Segmente. Ohne Spalte segment_ids zählt activity_id als einziges Segment.
+# Grenzfall: Hat nur ein Teil der Segmente Zonendaten, deckt die Zonenzeit nur diesen Teil ab.
+zone_by_activity <- function(zt, acts) {
+  if (is.null(zt)) return(NULL)
+  ids <- if ("segment_ids" %in% names(acts)) acts$segment_ids else acts$activity_id
+  sp  <- strsplit(ifelse(is.na(ids), acts$activity_id, ids), ";", fixed = TRUE)
+  map <- tibble(activity_id = rep(acts$activity_id, lengths(sp)), segment = unlist(sp))
+  num <- c("trimp_z", "z_min", paste0("z", 1:5, "_min"))
+  out <- map |>
+    inner_join(zt, by = c("segment" = "activity_id")) |>
+    group_by(activity_id) |>
+    summarise(across(all_of(num), sum_na), .groups = "drop")
+  out$pct_z45 <- ifelse(out$z_min > 0, (out$z4_min + out$z5_min) / out$z_min * 100, NA_real_)
+  out
+}
+
 session_load <- function(acts, p, commute_hrr = 0.40, zones = NULL) {
-  zt <- zone_trimp(zones, p)
+  zt <- zone_by_activity(zone_trimp(zones, p), acts)
   out <- acts |> mutate(
     hrr       = (avg_hr - p$rhr_ref) / (p$hrmax - p$rhr_ref),
     est       = is.na(avg_hr) & type_key %in% "cycling",

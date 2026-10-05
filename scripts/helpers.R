@@ -23,6 +23,7 @@ sum_na <- function(x) if (all(is.na(x))) NA_real_ else sum(x, na.rm = TRUE)
 max_na <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
 
 merge_rides <- function(acts, gap_min = 30, min_min = 3) {
+  acts$segment_ids <- acts$activity_id    # Nicht-Rad-Aktivitäten bestehen aus genau einem Segment
   is_ride <- acts$type_key %in% "cycling"
   rides <- acts[is_ride, ] |>
     arrange(start) |>
@@ -33,11 +34,14 @@ merge_rides <- function(acts, gap_min = 30, min_min = 3) {
                       as.Date(start) != lag(as.Date(start)),
            trip    = cumsum(new_trip)) |>
     group_by(trip) |>
-    summarise(activity_id  = first(activity_id), start = first(start),
+    # Reihenfolge beachten: summarise() sieht früher erzeugte Spalten. avg_hr muss vor der
+    # Überschreibung von duration_min stehen, sonst fehlen die Segment-Gewichte.
+    summarise(avg_hr = if (any(!is.na(avg_hr))) weighted.mean(avg_hr, coalesce(duration_min, 0), na.rm = TRUE) else NA_real_,
+              segment_ids  = paste(activity_id, collapse = ";"),   # für Zonen-Zuordnung (session_load)
+              activity_id  = first(activity_id), start = first(start),
               name = first(name), type_key = first(type_key),
               distance_km  = sum_na(distance_km),
               duration_min = sum(duration_min, na.rm = TRUE),
-              avg_hr = if (any(!is.na(avg_hr))) weighted.mean(avg_hr, duration_min, na.rm = TRUE) else NA_real_,
               max_hr = max_na(max_hr), kcal = sum_na(kcal), elev_gain = sum_na(elev_gain),
               te_aerobic = max_na(te_aerobic), te_anaerobic = max_na(te_anaerobic),
               .groups = "drop") |>

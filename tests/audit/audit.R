@@ -1,0 +1,45 @@
+suppressPackageStartupMessages({library(here);library(dplyr);library(readr);library(tibble)})
+source(here("scripts","helpers.R")); source(here("scripts","load_recovery.R"))
+d <- read_csv(here("data","garmin_daily.csv"),show_col_types=FALSE)
+cat("Tage:",nrow(d),range(as.character(d$date)),"\n")
+cat("NA-Anteil je Spalte (%):\n"); print(round(colMeans(is.na(d))*100)[colMeans(is.na(d))>0])
+cat("\nresting_hr summary:\n"); print(summary(d$resting_hr)); print(table(d$resting_hr<45,useNA="a"))
+cat("\nsleep_h<5:",sum(d$sleep_h<5,na.rm=T)," sleep_h==0/NA:",sum(is.na(d$sleep_h)|d$sleep_h==0),"\n")
+cat("hrv_night n:",sum(!is.na(d$hrv_night)),"ready n:",sum(!is.na(d$ready_score)),"\n")
+cat("steps NA:",sum(is.na(d$steps)),"steps==0:",sum(d$steps==0,na.rm=T),"\n")
+a <- read_csv(here("data","garmin_activities.csv"),show_col_types=FALSE,col_types=cols(activity_id=col_character(),start=col_datetime(),name=col_character(),type_key=col_character(),.default=col_double()))
+cat("\nAktivitäten roh:",nrow(a),"\n"); print(table(a$type_key))
+cat("avg_hr NA je Typ:\n"); print(a|>group_by(type_key)|>summarise(n=n(),na_hr=sum(is.na(avg_hr)),med_dur=median(duration_min)))
+am <- merge_rides(a,30,3)|>mutate(group=activity_group(type_key)); cat("nach merge:",nrow(am),"\n")
+z <- read_csv(here("data","garmin_activity_zones.csv"),show_col_types=FALSE,col_types=cols(activity_id=col_character(),.default=col_double()))
+cat("\nZonen n:",nrow(z),"\n"); print(summary(z[,c("z1_low","z2_low","z3_low","z4_low","z5_low")]))
+cat("Aktivitäten mit HR aber ohne Zonen (nach merge):",sum(!is.na(am$avg_hr) & !am$activity_id %in% z$activity_id),"\n")
+# merge: activity_id of merged ride = first segment -> zones only first segment?
+rides_m <- am|>filter(type_key=="cycling"); cat("gemergte Fahrten:",nrow(rides_m)," davon mit Zonen (1. Segment):",sum(rides_m$activity_id %in% z$activity_id),"\n")
+rhr_ref <- median(d$resting_hr[d$resting_hr>=45],na.rm=T); p <- athlete_profile(rhr_ref)
+cat("\nAlter",p$age,"HFmax",p$hrmax,p$hrmax_source,"rhr_ref",rhr_ref,"\n"); print(p$zones)
+cat("Garmin HFmax aus Z1-low*2:",median(2*z$z1_low),"\n")
+cat("max_hr>HFmax:",sum(am$max_hr>p$hrmax,na.rm=T),"von",sum(!is.na(am$max_hr)),"; max(max_hr)=",max(am$max_hr,na.rm=T),"\n")
+as <- session_load(am,p,0.4,z); print(table(as$trimp_src,useNA="a"))
+print(as|>group_by(trimp_src)|>summarise(n=n(),med=median(trimp,na.rm=T),sum=sum(trimp,na.rm=T)))
+dl <- daily_load_recovery(d,as)
+cat("\nunrecorded Tage:",sum(dl$unrecorded),"\n")
+cat("ACWR n:",sum(!is.na(dl$acwr)),"; chronic<1:",sum(dl$chronic_d<1,na.rm=T),"\n"); print(summary(dl$acwr))
+cat("Anteil load_est an load:",sum(dl$load_est,na.rm=T)/sum(dl$load,na.rm=T),"\n")
+# ACWR coupled vs uncoupled, vs EWMA
+cat("\nflags dist:\n"); print(table(dl$flags,useNA="a"))
+cat("Signal-Raten:",colMeans(dl[,c("sig_rhr","sig_sleep","sig_bb","sig_hrv")],na.rm=T),"\n")
+cat("rhr_z NA:",sum(is.na(dl$rhr_z)),"hrv_z NA:",sum(is.na(dl$hrv_z)),"\n")
+r <- recovery_summary(dl); print(as.data.frame(r))
+cat("hiit Tage:",sum(dl$hiit),"\n")
+# autokorr/ ties: p-value multiplicity
+cat("p<0.05 count:",sum(r$p<0.05),"of",nrow(r),"\n")
+# Garmin ACWR vs own
+print(cor(dl$acwr,dl$ts_acwr,use="complete.obs")); print(cor(dl$load, dl$ts_acute, use="complete.obs"))
+cat("ready vs flags cor:", cor(dl$ready_score, dl$flags, use="complete.obs"),"\n")
+# sleep duration distribution
+print(summary(d$sleep_h)); print(summary(d$sleep_score))
+# timestamps: start tz
+print(head(am$start)); 
+# weight
+w <- read_csv(here("data","garmin_weight.csv"),show_col_types=FALSE); print(w)
