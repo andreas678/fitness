@@ -101,6 +101,7 @@ Rscript tests/testthat.R                                                  # R-Te
 ~/.virtualenvs/r-garmin/bin/python -m unittest discover -s tests/python   # Python-Tests
 node tests/js/test_weight_change.mjs                                      # JavaScript-Test (Gewichtstrend)
 node tests/js/test_date_range.mjs                                         # JavaScript-Test (Zeitraum-Auswahl)
+node tests/js/test_meta_constants.mjs                                    # JavaScript-Test (Template ohne eigene Konstanten-Literale)
 ```
 
 `tests/audit/` enthält Skripte aus der Methodenprüfung und der Trainingsentwicklung (Sensitivitäts- und Plausibilitätsrechnungen auf den echten Daten über den Produktionsweg, brauchen `data/`).
@@ -112,7 +113,7 @@ scripts/
   garmin_fitness.R         Abruf, Cache, Plausibilitätsprüfung
   build_dashboard.R        HTML-Dashboard bauen
   dashboard_template.html  Vorlage (Chart.js, Auswertung im Browser)
-  helpers.R                gemeinsame Funktionen (Bereinigung, Annotationen, Referenzen, Prüfungen, Gewichts- und Anpassungstrends)
+  helpers.R                gemeinsame Funktionen und Konstanten fürs Dashboard (Bereinigung, Annotationen, Referenzen, Prüfungen, Gewichts- und Anpassungstrends)
   load_recovery.R          Profil, TRIMP, ACWR, Fitness/Ermüdung, Baselines, Erholungs-Index, Erholungsmodell
   weather.R                Tagestemperaturen (Abruf, Cache) und Zusammenhang mit den Tageswerten
   update_weather.R         Tagestemperaturen allein nachladen

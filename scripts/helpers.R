@@ -3,6 +3,25 @@
 # (benötigt dplyr; wird per source() eingebunden)
 # =============================================================================
 
+# ---- Konstanten, die auch das Dashboard nutzt -------------------------------------------------
+# Einzige Quelle: build_dashboard.R reicht sie als META an das JavaScript weiter (step_goal, group_colors,
+# acwr, ride_gap_min, heat_c in weather.R). Im Template stehen dafür keine Literale; tests/js/test_meta_constants.mjs wacht darüber.
+RIDE_GAP_MIN <- 30      # Rad-Segmente mit kleinerem Abstand (min) gelten als eine Fahrt
+RIDE_MIN_MIN <- 3       # Fahrten unter dieser Dauer (min) werden verworfen
+STEP_GOAL    <- 10000   # Schrittziel pro Tag
+ACWR_LOW     <- 0.8     # grober Richtwert für den ausgewogenen ACWR-Bereich, kein belegter Schwellenwert
+ACWR_HIGH    <- 1.3
+ACWR_VERY_HIGH <- 1.5   # darüber gilt der ACWR als "hoch" (Anzeige im Dashboard)
+# Farben je Aktivitätsgruppe; die Namen müssen den Ergebnissen von activity_group() entsprechen (Reihenfolge = Stapelreihenfolge)
+GROUP_COLORS <- c(
+  "Rad"             = "#0072B2",
+  "Laufen"          = "#D55E00",
+  "Gym / HIIT"      = "#CC79A7",
+  "Gehen / Wandern" = "#009E73",
+  "Segeln / Wasser" = "#56B4E9",
+  "Sonstiges"       = "#999999"
+)
+
 # Aktivitätstyp (Garmin typeKey) -> Gruppe
 activity_group <- function(type) {
   type <- tolower(as.character(type))
@@ -22,7 +41,7 @@ activity_group <- function(type) {
 sum_na <- function(x) if (all(is.na(x))) NA_real_ else sum(x, na.rm = TRUE)
 max_na <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
 
-merge_rides <- function(acts, gap_min = 30, min_min = 3) {
+merge_rides <- function(acts, gap_min = RIDE_GAP_MIN, min_min = RIDE_MIN_MIN) {
   acts$segment_ids <- acts$activity_id    # Nicht-Rad-Aktivitäten bestehen aus genau einem Segment
   is_ride <- acts$type_key %in% "cycling"
   rides <- acts[is_ride, ] |>

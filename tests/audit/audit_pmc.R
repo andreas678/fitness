@@ -3,7 +3,7 @@ suppressPackageStartupMessages({library(here);library(dplyr);library(readr);libr
 source(here("scripts","helpers.R")); source(here("scripts","load_recovery.R"))
 d <- read_csv(here("data","garmin_daily.csv"),show_col_types=FALSE) |> apply_annotations(read_annotations())
 a <- read_csv(here("data","garmin_activities.csv"),show_col_types=FALSE,col_types=cols(activity_id=col_character(),start=col_datetime(),name=col_character(),type_key=col_character(),.default=col_double()))
-am <- merge_rides(a,30,3); zn <- read_csv(here("data","garmin_activity_zones.csv"),show_col_types=FALSE,col_types=cols(activity_id=col_character(),.default=col_double()))
+am <- merge_rides(a,RIDE_GAP_MIN,RIDE_MIN_MIN); zn <- read_csv(here("data","garmin_activity_zones.csv"),show_col_types=FALSE,col_types=cols(activity_id=col_character(),.default=col_double()))
 ref <- read_ref(); RECALC <- FALSE                                   # feste Referenzwerte wie in build_dashboard.R
 rr <- resolve_rhr_ref(ref, median(clean_daily(d)$resting_hr, na.rm = TRUE), env = suppressWarnings(as.numeric(Sys.getenv("RHR_REF"))), recalc = RECALC)
 p <- athlete_profile(rr$value); commute <- resolve_commute(ref, am, p, recalc = RECALC)

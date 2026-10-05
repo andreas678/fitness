@@ -22,8 +22,6 @@ source(here("scripts", "load_recovery.R"))
 source(here("scripts", "weather.R"))
 
 RECALC <- "--recalc-profile" %in% commandArgs(trailingOnly = TRUE)   # feste Referenzwerte neu bestimmen
-RIDE_GAP_MIN <- 30    # Rad-Segmente mit kleinerem Abstand gelten als eine Fahrt (wie die Standardwerte von merge_rides)
-RIDE_MIN_MIN <- 3
 
 ann       <- read_annotations()      # data/annotations.csv: bekannte Zeiträume (Segeln, Nachtwachen ...)
 daily_raw <- read_csv(here("data", "garmin_daily.csv"), show_col_types = FALSE) |>
@@ -136,13 +134,16 @@ peak <- hr_peak_stats(acts_s, hr_raw, prof)
 meta <- list(
   built = format(Sys.time(), "%d.%m.%Y %H:%M"),
   recovery_design = recov_design,
-  ride_gap_min = RIDE_GAP_MIN, ride_min_min = RIDE_MIN_MIN, commute_hrr = COMMUTE_HRR,
+  ride_gap_min = RIDE_GAP_MIN, commute_hrr = COMMUTE_HRR,
+  step_goal = STEP_GOAL, heat_c = HEAT_C,                       # Konstanten aus helpers.R und weather.R, das Dashboard hat keine eigenen Literale
+  group_colors = as.list(GROUP_COLORS),                         # als Objekt, nicht als Liste (Reihenfolge bleibt)
+  acwr = list(low = ACWR_LOW, high = ACWR_HIGH, very_high = ACWR_VERY_HIGH),
   commute = list(n = commute$n, lo = commute$lo, hi = commute$hi, hr = commute$hr, source = commute$source),
   rec_index = list(n_eff = round(rec_info$n_eff, 2), threshold = REC_INDEX_THRESHOLD),   # effektive Zahl unabhängiger Signale
   pmc = list(tau_fit = formals(fitness_fatigue)$tau_fit, tau_fat = formals(fitness_fatigue)$tau_fat,
              sens = mutate(pmc_sens, across(where(is.numeric), ~ round(.x, 1)))),
   weather = list(place = wx_place, n_days = if ("tmax" %in% names(daily)) sum(!is.na(daily$tmax)) else 0L, source = "Open-Meteo"),
-  min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR,                 # Schwellen aus helpers.R, vom Dashboard mitgenutzt
+  min_sleep_h = MIN_SLEEP_H,                                    # Schwelle aus helpers.R, vom Dashboard mitgenutzt (Ruhepuls: Flag rhr_bad)
   sleep_cols = c(SLEEP_COLS, "bed_h", "wake_h"),                # bei ungültiger Nacht ausblendbar
   garmin_zones = if (!is.null(zones_raw) && nrow(zones_raw) > 0)
     list(lows = round(c(median(zones_raw$z1_low, na.rm = TRUE), median(zones_raw$z2_low, na.rm = TRUE),
