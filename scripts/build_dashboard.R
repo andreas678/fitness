@@ -22,7 +22,7 @@ source(here("scripts", "load_recovery.R"))
 source(here("scripts", "weather.R"))
 
 RECALC <- "--recalc-profile" %in% commandArgs(trailingOnly = TRUE)   # feste Referenzwerte neu bestimmen
-RIDE_GAP_MIN <- 30    # wie in garmin_fitness.R
+RIDE_GAP_MIN <- 30    # Rad-Segmente mit kleinerem Abstand gelten als eine Fahrt (wie die Standardwerte von merge_rides)
 RIDE_MIN_MIN <- 3
 
 ann       <- read_annotations()      # data/annotations.csv: bekannte Zeiträume (Segeln, Nachtwachen ...)
