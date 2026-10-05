@@ -104,7 +104,7 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
     <div class="card"><h3>Trainingsbelastung pro Tag</h3><div class="sub">TRIMP aus Durchschnittspuls und Dauer. Linien: Ø Tageslast der letzten 7 bzw. 28 Tage. Zeiträume ohne Aufzeichnung bleiben leer</div><div class="chartbox"><canvas id="c-load"></canvas></div><div class="note" id="load-note"></div></div>
     <div class="card"><h3>Akut-/Chronisch-Verhältnis (ACWR)</h3><div class="sub">7-Tage- zu 28-Tage-Last. Grüner Bereich 0,8–1,3 ist nur ein grober Richtwert. Rosa gestrichelt: nur gemessene Last, ohne die geschätzten Pendelfahrten</div><div class="chartbox"><canvas id="c-acwr"></canvas></div></div>
     <div class="card"><h3>Ruhepuls gegen persönliche Baseline</h3><div class="sub">Band: Ø der 28 Vortage ± 1,5 Standardabweichungen, rote Punkte: deutlich erhöht</div><div class="chartbox"><canvas id="c-rhrbase"></canvas></div></div>
-    <div class="card"><h3>Erholungs-Signale pro Tag</h3><div class="sub">Zählt: Ruhepuls erhöht, Schlaf-Score niedrig, Body-Battery-Höchstwert niedrig, HRV niedrig (je gegen die eigene 28-Tage-Baseline)</div><div class="chartbox"><canvas id="c-flags"></canvas></div></div>
+    <div class="card"><h3>Erholungs-Index pro Tag</h3><div class="sub" id="flags-sub"></div><div class="chartbox"><canvas id="c-flags"></canvas></div></div>
     <div class="card" id="recovery-card"></div>
     <div class="card" id="zones-card"></div>
   </section>
@@ -249,8 +249,8 @@ function extraKpis(daily, from, to) {
   const a = lastAcwr ? lastAcwr.acwr : null;
   const band = a == null ? "" : a < 0.8 ? "niedrig (Untertraining)" : a <= 1.3 ? "ausgewogen" : a <= 1.5 ? "erhöht" : "hoch";
   const bcls = a == null ? "" : (a > 1.5 ? "bad" : a >= 0.8 && a <= 1.3 ? "good" : "");
-  const warn = d.filter(r => r.flags >= 2).length;
-  const warn14 = daily.filter(r => inRange(r.t, maxT - 13 * DAY, maxT) && r.flags >= 2).length;
+  const warn = d.filter(r => r.rec_low).length;
+  const warn14 = daily.filter(r => inRange(r.t, maxT - 13 * DAY, maxT) && r.rec_low).length;
   const hrLow = !!P.hr_low;   // 30-s-Spitze liegt über HFmax plus Sensor-Toleranz (in R berechnet)
   const lastOf = k => { const r = [...d].reverse().find(x => x[k] != null); return r ? r[k] : null; };
   const hrvAvg = mean(d.slice(-7).map(r => r.hrv_night)), hrvRow = [...d].reverse().find(r => r.hrv_night != null);
@@ -270,7 +270,7 @@ function extraKpis(daily, from, to) {
     (vo2 != null ? `<div class="kpi"><div class="l">VO₂max</div><div class="v">${nf(vo2, 1)}<small>ml/kg/min</small></div><div class="d"></div></div>` : "") +
     (wLast ? `<div class="kpi"><div class="l">Gewicht</div><div class="v">${nf(wLast.weight_kg, 1)}<small>kg</small></div><div class="d">${wText}</div></div>` : "");
   return more + `<div class="kpi"><div class="l">ACWR aktuell</div><div class="v">${nf(a, 2)}</div><div class="d ${bcls}">${band}</div></div>` +
-    `<div class="kpi"><div class="l">Tage mit ≥ 2 Warn-Signalen (von 4)</div><div class="v">${warn}</div><div class="d ${warn14 >= 3 ? "bad" : ""}">${warn14} in den letzten 14 Tagen</div></div>` +
+    `<div class="kpi"><div class="l">Tage mit niedrigem Erholungs-Index (≤ ${nf(META.rec_index.threshold, 1)})</div><div class="v">${warn}</div><div class="d ${warn14 >= 3 ? "bad" : ""}">${warn14} in den letzten 14 Tagen</div></div>` +
     `<div class="kpi"><div class="l">HFmax (Zonen-Basis)</div><div class="v">${P.hrmax}<small>bpm</small></div><div class="d ${hrLow ? "bad" : ""}">${P.hrmax_source}${hrLow ? " · vermutlich zu niedrig (30-s-Spitze bis " + nf(P.obs_max) + ")" : ""}</div></div>`;
 }
 
@@ -341,11 +341,11 @@ function makeCharts() {
       { label: "Ruhepuls", data: [], showLine: false, borderColor: "#E69F00", backgroundColor: "#E69F00", pointRadius: 3.5 }] },
     options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze"]), { tooltip: { filter: i => ["Ruhepuls", "Baseline"].includes(i.dataset.label), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 1)} bpm` } } }),
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "bpm" } } } }) });
-  mk("c-flags", { type: "bar", data: { labels: [], datasets: [{ label: "Signale", data: [], backgroundColor: [] }] },
+  mk("c-flags", { type: "bar", data: { labels: [], datasets: [{ label: "Erholungs-Index", data: [], backgroundColor: [] }] },
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: {
         label: c => { const r = flagRows[c.dataIndex]; const s = [r.sig_rhr && "Ruhepuls erhöht", r.sig_sleep && "Schlaf-Score niedrig", r.sig_bb && "Body Battery niedrig", r.sig_hrv && "HRV niedrig"].filter(Boolean);
-          return s.length ? s : "keine Signale"; } } } },
-      scales: { x: gridX(false), y: { min: 0, max: 4, ticks: { stepSize: 1, precision: 0 }, grid: { color: css("--grid") } } } }) });
+          return [`Index ${nf(c.parsed.y, 1)}`, s.length ? "Einzelsignale: " + s.join(", ") : "keine Einzelsignale"]; } } } },
+      scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "Index (niedriger = schlechter)" } } } }) });
   const hhmm = v => String(Math.floor(v) % 24).padStart(2, "0") + ":" + String(Math.round((v % 1) * 60) % 60).padStart(2, "0");
   mk("c-hrv", { type: "line", data: { labels: [], datasets: [
       { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0 },
@@ -389,7 +389,7 @@ let flagRows = [], readyRows = [], dayRows = [];
 const dayNote = r => !r ? "" : r.load_unknown ? "Last unbekannt" + (r.ann_note ? ": " + r.ann_note : " (Uhr getragen, nichts aufgezeichnet)")
   : r.no_wear ? "Uhr vermutlich nicht getragen" : r.ann_note ? r.ann_note : r.partial ? "unvollständiger Tag" : "";
 const dayFooter = items => dayNote(dayRows[items[0].dataIndex]);
-const FLAG_COLORS = ["#00000000", "#E69F00", "#D55E00", "#B3261E", "#7A1712"];
+const indexColor = v => v == null ? "#00000000" : v <= META.rec_index.threshold ? "#B3261E" : v <= -1 ? "#E69F00" : "#9aa5b1";
 function renderLoadNote(d) {
   const lo = d.length ? d[0].t : minT, hi = d.length ? d[d.length - 1].t : maxT, C = META.commute || {};
   const inR = ACTS.filter(a => inRange(actT(a), lo, hi) && a.trimp != null);
@@ -420,8 +420,11 @@ function updateLoadCharts(d, L) {
   const tmap = new Map(WEIGHT_TREND.map(w => [w.date, w]));
   setData("c-weight", L, [d.map(r => tmap.has(r.date) ? tmap.get(r.date).lo : null), d.map(r => tmap.has(r.date) ? tmap.get(r.date).hi : null),
     d.map(r => tmap.has(r.date) ? tmap.get(r.date).fit : null), d.map(r => wmap.has(r.date) ? wmap.get(r.date) : null)]);
-  const f = charts["c-flags"]; f.data.datasets[0].backgroundColor = d.map(r => FLAG_COLORS[r.flags] || FLAG_COLORS[3]);
-  setData("c-flags", L, [d.map(r => r.flags)]);
+  const f = charts["c-flags"]; f.data.datasets[0].backgroundColor = d.map(r => indexColor(r.rec_index));
+  setData("c-flags", L, [d.map(r => r.rec_index)]);
+  document.getElementById("flags-sub").textContent =
+    `Mittel aus Ruhepuls (erhöht), Schlaf-Score, Body-Battery-Höchstwert und HRV (jeweils gegen die eigene 28-Tage-Baseline, niedriger = schlechter). ` +
+    `Die vier Signale überlappen und entsprechen etwa ${nf(META.rec_index.n_eff, 1)} unabhängigen; rot ab ${nf(META.rec_index.threshold, 1)}. Beschreibend, nicht an einem Ergebnis geprüft.`;
 }
 function renderRecovery() {
   const fmtP = p => p == null ? "–" : p < 0.001 ? "&lt; 0,001" : nf(p, 3);

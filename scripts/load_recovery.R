@@ -235,6 +235,7 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
     list(m = m, s = s, z = ifelse(!is.na(s) & s > 0, (x - m) / s, NA_real_))
   }
   hrv   <- if ("hrv_night" %in% names(cl)) cl$hrv_night else rep(NA_real_, nrow(d))
+  hrv   <- ifelse(!is.na(hrv) & hrv > 0, log(hrv), NA_real_)   # HRV schwankt multiplikativ: z auf der ln-Skala
   zr <- z(rhr); zs <- z(sleep); zb <- z(bb); zh <- z(hrv)
   d$rhr_base <- zr$m; d$rhr_lo <- zr$m - 1.5 * zr$s; d$rhr_hi <- zr$m + 1.5 * zr$s
   d$rhr_z <- zr$z; d$sleep_z <- zs$z; d$bb_z <- zb$z; d$hrv_z <- zh$z
@@ -243,7 +244,38 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
   d$sig_bb    <- coalesce(zb$z <= -1, FALSE)     # Body-Battery-Höchstwert deutlich niedriger
   d$sig_hrv   <- coalesce(zh$z <= -1, FALSE)     # nächtliche HRV deutlich niedriger
   d$flags <- d$sig_rhr + d$sig_sleep + d$sig_bb + d$sig_hrv
+  # Die vier Signale sind nicht unabhängig (Schlaf-Score und Body Battery hängen eng zusammen, Ruhepuls und
+  # HRV gegenläufig); der Index fasst sie zusammen und berücksichtigt das über die Streuung des Mittels.
+  ri <- recovery_index(cbind(-d$rhr_z, d$sleep_z, d$bb_z, d$hrv_z))
+  d$rec_index <- ri$index
+  d$rec_low   <- coalesce(ri$index <= REC_INDEX_THRESHOLD, FALSE)
+  attr(d, "rec_index_info") <- list(n_eff = ri$n_eff, sd = ri$sd, cor = ri$cor)
   d
+}
+
+# ---- Erholungs-Index: die vier Signale gemeinsam ---------------------------------------------
+# Warn-Signale (Ruhepuls, Schlaf-Score, Body-Battery-Höchstwert, HRV) messen zum Teil dieselbe Erholung. Die
+# bloße Anzahl "mindestens 2 von 4" zählt diese Information mehrfach. Der Index ist das Mittel der vier
+# z-Werte (alle so ausgerichtet, dass niedriger = schlechter) geteilt durch seine eigene Standardabweichung
+# über alle Tage: Redundante Signale streuen im Mittel stärker und zählen dadurch weniger. Für die
+# Kennzahl n_eff gilt: n_eff = m^2 / Summe der Korrelationsmatrix (m Signale; 1 = alle identisch, m = unabhängig).
+# Näherung: Standardabweichung und Korrelation stammen aus dem gesamten Zeitraum (beschreibend, kein Test).
+# Die Schwelle ist nicht an einem Ergebnis (Krankheit, Leistungsabfall) validiert.
+REC_INDEX_MIN_SIGNALS <- 3
+REC_INDEX_THRESHOLD   <- -1.5
+
+effective_signals <- function(z) {
+  R <- suppressWarnings(cor(z, use = "pairwise.complete.obs"))
+  if (anyNA(R)) return(NA_real_)
+  unname(min(ncol(z), ncol(z)^2 / sum(R)))   # zufällig negative Korrelationen ergäben mehr als m
+}
+
+recovery_index <- function(z, min_signals = REC_INDEX_MIN_SIGNALS) {
+  k   <- rowSums(!is.na(z))
+  raw <- ifelse(k >= min_signals, rowMeans(z, na.rm = TRUE), NA_real_)
+  s   <- if (sum(!is.na(raw)) >= 2) sd(raw, na.rm = TRUE) else NA_real_
+  list(index = if (is.na(s) || s == 0) rep(NA_real_, nrow(z)) else raw / s, sd = s,
+       n_eff = effective_signals(z), cor = suppressWarnings(cor(z, use = "pairwise.complete.obs")))
 }
 
 # ---- Erholung nach HIIT: Vergleich der Folgetag-Werte -------------------------------------

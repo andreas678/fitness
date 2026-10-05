@@ -6,7 +6,7 @@ Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholu
 
 ## Was herauskommt
 
-- **`_outputs/fitness_dashboard.html`**: interaktives Dashboard (Kennzahlen, Trainingsbelastung, ACWR, Erholungs-Signale, HRV, Schlaf, Gewichtstrend, Herzfrequenzzonen, Aktivitätstabelle).
+- **`_outputs/fitness_dashboard.html`**: interaktives Dashboard (Kennzahlen, Trainingsbelastung, ACWR, Erholungs-Index, HRV, Schlaf, Gewichtstrend, Herzfrequenzzonen, Aktivitätstabelle).
 - **`_outputs/*.png`**: Einzelgrafiken und `fitness_dashboard.png` (Schritte, Ruhepuls, Schlaf, Wochenumfang, Rad-Kilometer, Puls je Aktivität, Body Battery).
 - Konsolenausgabe mit Kurzauswertung, Plausibilitätsprüfung und Sensitivitätstabelle.
 
@@ -83,7 +83,7 @@ from,to,note,load_unknown,short_sleep_real
 
 - **Belastung (TRIMP):** Banister-Formel aus Dauer und Herzfrequenzreserve. Mit Zeit in Zonen je Zone gerechnet (bildet Intervalle richtig ab), sonst aus dem Durchschnittspuls. Radfahrten ohne Pulsdaten (Pendeln) werden mit einer Intensität angesetzt, die aus den gemessenen Fahrten abgeleitet ist, und sind als „geschätzt“ markiert. Der Anteil geschätzter Last steht im Dashboard.
 - **ACWR:** Verhältnis der mittleren Tageslast der letzten 7 zu den letzten 28 Tagen, zusätzlich eine Variante nur mit gemessener Last. Der Bereich 0,8–1,3 ist ein grober Richtwert, kein Schwellenwert für Verletzungsrisiko. Unvollständige Tage zählen nicht mit.
-- **Warn-Signale:** Ruhepuls, Schlaf-Score, Body-Battery-Höchstwert und HRV gegen die eigene 28-Tage-Baseline (z-Wert). Die vier Signale hängen zusammen und zählen daher teilweise doppelt.
+- **Erholungs-Index:** Ruhepuls, Schlaf-Score, Body-Battery-Höchstwert und HRV (auf der ln-Skala) jeweils gegen die eigene 28-Tage-Baseline (z-Wert, niedriger = schlechter). Die vier Signale überlappen (Schlaf-Score und Body Battery r ≈ 0,77), sie entsprechen bei diesen Daten etwa 1,8 unabhängigen Signalen. Der Index ist daher das Mittel der z-Werte geteilt durch seine eigene Standardabweichung; ab −1,5 gilt ein Tag als auffällig (rund 6 % der Tage). Mindestens 3 der 4 Signale müssen vorliegen. Die Einzelsignale bleiben in der Grafik als Hinweistext sichtbar.
 - **Erholung nach HIIT:** Regressionsmodell mit dem Wochentag der Messung, Konfidenzintervall mit Newey-West-Standardfehlern, p-Werte nach Holm. Das Dashboard zeigt, auf wie vielen Wochentagen HIIT- und Vergleichstage vorkommen. Ein Zusammenhang, kein Kausalbeweis. Die Training Readiness wird nicht bewertet, weil sie Garmins eigene Last enthält.
 - **HFmax-Prüfung:** Vergleich mit dem höchsten 30-Sekunden-Mittel je Einheit. Werte weit über der Tanaka-Schätzung (+ 30 bpm) gelten als Sensorartefakt. HFmax wird nie automatisch angepasst.
 - **Gewichtstrend:** lokaler Trend mit 95-%-Band ab 8 Wiegungen. Die Änderung im gewählten Zeitraum (mit Konfidenzintervall) gibt es ab 6 Wiegungen, sonst steht dort „zu wenige für einen Trend“.
@@ -124,5 +124,5 @@ Der Ergebnisbericht der Methodenprüfung mit offenen Punkten steht in [`plans/01
 ## Bekannte Grenzen
 
 - Einzelperson, ein Handgelenk-Sensor: Aussagen gelten für diese Datenbasis und lassen sich nicht verallgemeinern. Optische Pulsmessung am Handgelenk kann bei Intervalltraining Artefakte liefern.
-- Die Warn-Signale sind nicht gegen ein Ergebnis (Krankheit, Leistungsabfall) validiert.
+- Der Erholungs-Index ist beschreibend und nicht gegen ein Ergebnis (Krankheit, Leistungsabfall) validiert; Schwelle, Standardabweichung und Korrelation stammen aus dem eigenen Gesamtzeitraum.
 - Die Last von Zeiträumen ohne Aufzeichnung bleibt unbekannt und wird nicht geschätzt.

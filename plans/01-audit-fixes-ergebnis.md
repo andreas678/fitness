@@ -18,7 +18,7 @@ Status je Befund der Prüfung. „Behoben“ heißt: Ursache beseitigt und durch
 | # | Befund | Status | Phase | Beleg / Hinweis |
 |---|--------|--------|-------|-----------------|
 | B7 | Schlaf-/Ruhepuls-Filter hartkodiert und inkonsistent (HTML gegen R) | behoben | 2, 3 | Eine Quelle in `helpers.R`, vom Dashboard mitgenutzt. Folge von Phase 3: Der Ø Schlaf im 90-Tage-Fenster sinkt von 7,6 auf 6,8 h, weil die Nachtwachen jetzt zählen (Garmin erfasst bei geteiltem Schlaf nur die Hauptphase, die Dauer ist eine Untergrenze). Abschaltbar über `short_sleep_real` in `data/annotations.csv`. |
-| B8 | Warn-Signale redundant (Schlaf–Body Battery r = 0,74), HRV roh statt ln(RMSSD), Schwellen nicht validiert | **offen** | – | Nicht Teil des Plans. Die Anzahl „≥ 2 von 4 Warn-Signalen“ zählt weiterhin dieselbe Information doppelt. |
+| B8 | Warn-Signale redundant (Schlaf–Body Battery r = 0,74), HRV roh statt ln(RMSSD), Schwellen nicht validiert | abgemildert | 9 | Alle vier Signale korrelieren (|r| 0,19–0,77), zusammen entsprechen sie 1,8 unabhängigen; 8 von 27 Tagen mit „≥ 2 Signalen“ gingen allein auf Schlaf-Score plus Body Battery zurück. Ersatz der Zählung „≥ 2 von 4“ durch einen Erholungs-Index (Mittel der z-Werte, auf Streuung 1 skaliert, Schwelle −1,5, ≥ 3 Signale nötig; 9 Tage = 5,8 %, alle davon auch nach der alten Zählung auffällig). HRV-z auf ln-Skala (Schiefe 0,93 → 0,34; Flags auf den echten Daten unverändert). Schwelle bleibt unvalidiert: Es gibt keine Ereignisdaten (Krankheit). Prüfung: `tests/audit/audit_b8.R`. |
 | B9 | ACWR: Evidenz des Richtbereichs umstritten | abgemildert | 3 | Methodenwahl (gekoppelt, entkoppelt, EWMA) ändert bei deinen Daten wenig; Garmin-ACWR korreliert nur mit r = 0,53. Hinweis „grober Richtwert“ im Dashboard, zweite Linie mit gemessener Last. |
 | B10 | Gewicht: Einzelwert gegen Einzelwert | behoben | 7 | Lokaler Trend mit 95-%-Band, KPI als lineare Änderung mit Konfidenzintervall (−3,62 kg [−4,88; −2,35]), unabhängig in R nachgerechnet; unter 6 Wiegungen kein Trend. |
 | B11 | Pipeline: Fehler als NA gecacht, wandernde Referenz, keine Prüfungen, keine Tests | behoben | 1, 6 | `fx_*`-Erfolgsmarken, Retry, Plausibilitätsprüfung, feste Referenz in `data/profile.json`, Testgerüst (R, Python, JavaScript). Restpunkt: Alt-Zeilen ohne Marken bleiben „unbekannt“ (nur `--refresh` holt sie nach). |
@@ -35,7 +35,7 @@ Das Dashboard scrollte bei 375 px Breite horizontal. Das bestand schon vor allen
 - Anti-Pattern-Grep: sauber (siehe Phase-8-Commit).
 
 ## Was noch offen ist
-1. **B8** (Warn-Signale): eigener Plan nötig.
+1. **B8** (Rest): Schwelle des Erholungs-Index gegen Ereignisse (Krankheit, Leistungseinbruch) prüfen. Dafür müssten solche Zeiträume in `data/annotations.csv` erfasst werden.
 2. **HFmax 192**: per Feldtest oder Brustgurt absichern; in Garmin Connect dasselbe eintragen, damit die Garmin-Zonen (derzeit 178) zu deiner Belastungsrechnung passen.
 3. **Segeltörn**: Die Last dieser 29 Tage ist unbekannt. Schätzen ließe sie sich höchstens aus dem Tagespuls, das wäre eine neue Annahme.
 4. **Pendel-Puls ist festgeschrieben**: bei mehr gemessenen Fahrten einmal `Rscript scripts/build_dashboard.R --recalc-profile`.
