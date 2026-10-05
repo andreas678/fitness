@@ -33,13 +33,18 @@ athlete_profile <- function(rhr_ref, today = Sys.Date()) {
   } else if (!is.na(age)) {
     hrmax <- tanaka_hrmax(age); src <- "geschätzt (Tanaka)"
   } else stop("BIRTHDAY (TT-MM-JJJJ) oder HRMAX in ~/.Renviron setzen.")
-  male <- !tolower(Sys.getenv("GENDER")) %in% c("female", "f", "w", "weiblich")
+  gender <- tolower(Sys.getenv("GENDER"))
+  male <- !gender %in% c("female", "f", "w", "weiblich")
+  if (!gender %in% c("male", "m", "female", "f", "w", "weiblich", "männlich", "maennlich"))
+    warning("GENDER ist nicht gesetzt oder unbekannt (\"", gender, "\"): Die Belastung wird mit den Koeffizienten für Männer gerechnet. ",
+            "Mit GENDER=\"male\" oder \"female\" in ~/.Renviron setzen.", call. = FALSE)
   hrr  <- hrmax - rhr_ref
   # Plausibilitätsgrenze für Pulsspitzen: Tanaka-Schätzung + 30 bpm (etwa 3 Streuungen der individuellen
   # HFmax). Ein 30-Sekunden-Mittel darüber gilt als Artefakt (z. B. optischer Sensor rastet auf die Bewegung ein).
   hr_ceiling <- if (is.na(age)) NA_real_ else tanaka_hrmax(age) + 30
   list(age = age, male = male, hrmax = hrmax, hrmax_source = src, hr_ceiling = hr_ceiling, rhr_ref = rhr_ref,
-       trimp_b = if (male) 1.92 else 1.67,                   # Banister-TRIMP-Faktor
+       trimp_a = if (male) 0.64 else 0.86,                   # Banister-TRIMP-Koeffizienten (Banister 1991):
+       trimp_b = if (male) 1.92 else 1.67,                   # Männer 0,64 * exp(1,92 x), Frauen 0,86 * exp(1,67 x)
        zones = tibble(zone = paste0("Z", 1:5),
                       lo = round(rhr_ref + hrr * ZONE_EDGES),
                       hi = round(rhr_ref + hrr * c(ZONE_EDGES[-1], 1))))
@@ -68,12 +73,16 @@ hr_peak_stats <- function(acts, hr, p, tol = 3) {
 }
 
 # ---- Belastung je Einheit ----------------------------------------------------------
-# Banister-TRIMP = Dauer(min) * HRR * 0.64 * exp(b * HRR), HRR = (HF - HFruhe)/(HFmax - HFruhe).
+# Banister-TRIMP = Dauer(min) * HRR * a * exp(b * HRR), HRR = (HF - HFruhe)/(HFmax - HFruhe).
+# Männer a = 0,64 und b = 1,92, Frauen a = 0,86 und b = 1,67 (Banister 1991; athlete_profile liefert trimp_a, trimp_b).
 # Mit Zeit-in-Zonen (garmin_activity_zones.csv, Garmin-Zonen) wird je Zone mit der Zonenmitte
 # gerechnet, das bildet Intervalle richtig ab. Ohne Zonendaten zählt nur der Durchschnittspuls.
 # Radfahrten ohne Pulsdaten (Pendeln) bekommen eine ANNAHME (commute_hrr) und sind als
 # "geschätzt" markiert.
-banister <- function(minutes, hrr, b) minutes * hrr * 0.64 * exp(b * hrr)
+banister <- function(minutes, hrr, b, a = 0.64) {
+  if (is.null(a)) a <- 0.64                       # Profil ohne trimp_a (z. B. von Hand gebaut): Koeffizient der Männer
+  minutes * hrr * a * exp(b * hrr)
+}
 
 # Garmin-Zonen (% der in Garmin eingestellten HFmax; Untergrenze Z1 = 50 %)
 zone_trimp <- function(zones, p) {
@@ -85,7 +94,7 @@ zone_trimp <- function(zones, p) {
   hrr  <- hrr_frac(mids, p)
   secs <- as.matrix(zones[paste0("z", 1:5, "_s")]); secs[is.na(secs)] <- 0
   tibble(activity_id = zones$activity_id,
-         trimp_z = rowSums(banister(secs / 60, hrr, p$trimp_b)),
+         trimp_z = rowSums(banister(secs / 60, hrr, p$trimp_b, p$trimp_a)),
          z_min   = rowSums(secs) / 60,
          pct_z45 = ifelse(rowSums(secs) > 0, (secs[, 4] + secs[, 5]) / rowSums(secs) * 100, NA_real_),
          z1_min = secs[, 1] / 60, z2_min = secs[, 2] / 60, z3_min = secs[, 3] / 60,
@@ -147,7 +156,7 @@ session_load <- function(acts, p, commute_hrr = 0.40, zones = NULL) {
     hrr       = hrr_frac(avg_hr, p, clip = FALSE),
     est       = is.na(avg_hr) & is_ride_type(type_key),
     hrr_use   = pmin(pmax(ifelse(est, commute_hrr, hrr), 0), 1),
-    trimp     = ifelse(is.na(hrr_use), NA_real_, banister(duration_min, hrr_use, p$trimp_b)),
+    trimp     = ifelse(is.na(hrr_use), NA_real_, banister(duration_min, hrr_use, p$trimp_b, p$trimp_a)),
     zone      = as.character(cut(hrr, c(-Inf, ZONE_EDGES, Inf),
                                  labels = c("<Z1", paste0("Z", 1:5)))),
     pct_hrmax = avg_hr / p$hrmax * 100

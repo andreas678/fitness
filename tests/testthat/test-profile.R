@@ -81,3 +81,22 @@ test_that("ZONE_EDGES liegen den Zonen und der Zonenzuordnung zugrunde", {
   s <- session_load(acts, c(p, list(trimp_b = 1.92)))
   expect_equal(s$zone, c("<Z1", paste0("Z", 1:5)))
 })
+
+# ---- Banister-Koeffizienten je Geschlecht ---------------------------------------------------------
+test_that("athlete_profile liefert die Banister-Koeffizienten für Männer und Frauen", {
+  env <- function(g) c(BIRTHDAY = "01-01-1974", HRMAX = "182", GENDER = g)
+  m <- with_env(env("male"),   athlete_profile(54, today))
+  f <- with_env(env("female"), athlete_profile(54, today))
+  expect_equal(c(m$trimp_a, m$trimp_b), c(0.64, 1.92))
+  expect_equal(c(f$trimp_a, f$trimp_b), c(0.86, 1.67))
+  expect_equal(with_env(env("w"), athlete_profile(54, today))$trimp_a, 0.86)            # Kürzel wie bisher
+})
+
+test_that("athlete_profile warnt bei fehlendem oder unbekanntem GENDER und rechnet dann wie für Männer", {
+  env <- function(g) c(BIRTHDAY = "01-01-1974", HRMAX = "182", GENDER = g)
+  expect_warning(p <- with_env(env(""), athlete_profile(54, today)), "GENDER")
+  expect_equal(c(p$trimp_a, p$trimp_b), c(0.64, 1.92))
+  expect_warning(with_env(env("divers"), athlete_profile(54, today)), "divers")
+  expect_warning(with_env(env("male"), athlete_profile(54, today)), NA)                 # gesetzt: keine Warnung
+  expect_warning(with_env(env("female"), athlete_profile(54, today)), NA)
+})
