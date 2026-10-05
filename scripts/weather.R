@@ -6,6 +6,7 @@
 # Es gilt immer nur das Wetter am Wohnort. In annotierten Zeiträumen (Segeltörn) war der Ort unbekannt,
 # diese Tage zählen in der Auswertung nicht.
 
+HEAT_C <- 30   # Hitzetag (DWD): Höchsttemperatur ab 30 °C; build_dashboard.R reicht den Wert als META.heat_c an das Dashboard
 WEATHER_DEFAULT <- list(lat = 53.55, lon = 9.99, place = "Hamburg")
 WEATHER_VARS <- c("temperature_2m_max", "temperature_2m_min", "temperature_2m_mean")
 

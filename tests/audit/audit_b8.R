@@ -3,7 +3,7 @@ suppressPackageStartupMessages({library(here);library(dplyr);library(readr);libr
 source(here("scripts","helpers.R")); source(here("scripts","load_recovery.R"))
 d <- read_csv(here("data","garmin_daily.csv"),show_col_types=FALSE) |> apply_annotations(read_annotations())   # wie build_dashboard.R
 a <- read_csv(here("data","garmin_activities.csv"),show_col_types=FALSE,col_types=cols(activity_id=col_character(),start=col_datetime(),name=col_character(),type_key=col_character(),.default=col_double()))
-am <- merge_rides(a,30,3)|>mutate(group=activity_group(type_key))
+am <- merge_rides(a,RIDE_GAP_MIN,RIDE_MIN_MIN)|>mutate(group=activity_group(type_key))
 zn <- read_csv(here("data","garmin_activity_zones.csv"),show_col_types=FALSE,col_types=cols(activity_id=col_character(),.default=col_double()))
 p <- athlete_profile(median(d$resting_hr[d$resting_hr>=45],na.rm=T))
 dl <- daily_load_recovery(d, session_load(am,p,0.4,zn))

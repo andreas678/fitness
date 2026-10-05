@@ -131,7 +131,7 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
   <h2 class="sect">Belastung &amp; Erholung</h2>
   <section class="charts">
     <div class="card"><h3>Trainingsbelastung pro Tag</h3><div class="sub">TRIMP aus Durchschnittspuls und Dauer. Linien: Ø Tageslast der letzten 7 bzw. 28 Tage. Zeiträume ohne Aufzeichnung bleiben leer</div><div class="chartbox"><canvas id="c-load"></canvas></div><div class="note" id="load-note"></div></div>
-    <div class="card"><h3>Akut-/Chronisch-Verhältnis (ACWR)</h3><div class="sub">7-Tage- zu 28-Tage-Last. Grüner Bereich 0,8–1,3 ist nur ein grober Richtwert. Rosa gestrichelt: nur gemessene Last, ohne die geschätzten Pendelfahrten</div><div class="chartbox"><canvas id="c-acwr"></canvas></div></div>
+    <div class="card"><h3>Akut-/Chronisch-Verhältnis (ACWR)</h3><div class="sub">7-Tage- zu 28-Tage-Last. Grüner Bereich <span id="acwr-range"></span> ist nur ein grober Richtwert. Rosa gestrichelt: nur gemessene Last, ohne die geschätzten Pendelfahrten</div><div class="chartbox"><canvas id="c-acwr"></canvas></div></div>
     <div class="card"><h3>Aufbau und Ermüdung</h3><div class="sub">Aus der Trainingslast (TRIMP). Oben: „Fitness“ (aufgebaute Last, langes Mittel) und „Ermüdung“ (kurzes Mittel). Unten: Form = Fitness minus Ermüdung vom Vortag</div><div class="chartbox"><canvas id="c-pmc"></canvas></div><div class="chartbox" style="height:130px;margin-top:6px"><canvas id="c-form"></canvas></div><div class="note" id="pmc-note"></div></div>
     <div class="card"><h3>Ruhepuls gegen persönliche Baseline</h3><div class="sub">Band: Ø der 28 Vortage ± 1,5 Standardabweichungen, rote Punkte: deutlich erhöht</div><div class="chartbox"><canvas id="c-rhrbase"></canvas></div></div>
     <div class="card"><h3>Erholungs-Index pro Tag</h3><div class="sub" id="flags-sub"></div><div class="chartbox"><canvas id="c-flags"></canvas></div></div>
@@ -167,15 +167,18 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
 <script>
 /*__DATA__*/
 
-const GROUP_COLORS = { "Rad": "#0072B2", "Laufen": "#D55E00", "Gym / HIIT": "#CC79A7",
-  "Gehen / Wandern": "#009E73", "Segeln / Wasser": "#56B4E9", "Sonstiges": "#999999" };
+// Konstanten kommen aus R (helpers.R, weather.R) über META; hier stehen dafür keine Literale
+// (tests/js/test_meta_constants.mjs prüft das).
+const GROUP_COLORS = META.group_colors, STEP_GOAL = META.step_goal, HEAT_C = META.heat_c, ACWR = META.acwr;
 const PHASE_COLORS = { Tief: "#1F4E79", Leicht: "#6BAED6", REM: "#9E7BB5", Wach: "#E69F00" };
-const STEP_GOAL = 10000, DAY = 86400000;
+const DAY = 86400000;
 const MIN_SLEEP_H = META.min_sleep_h, SLEEP_COLS = META.sleep_cols;   // Schwellen und Spalten kommen aus helpers.R
 
 const nf = (v, d = 0) => (v == null || Number.isNaN(v)) ? "–"
   : v.toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d });
-const tOf = s => Date.parse(s.slice(0, 10) + "T00:00:00Z");
+const acwrRange = () => `${nf(ACWR.low, 1)}–${nf(ACWR.high, 1)}`;
+const ACWR_LOW_LABEL = `Untergrenze ${nf(ACWR.low, 1)}`;
+const tOf =s => Date.parse(s.slice(0, 10) + "T00:00:00Z");
 const dOf = t => new Date(t).toISOString().slice(0, 10);
 const label = t => { const d = new Date(t); return String(d.getUTCDate()).padStart(2, "0") + "." + String(d.getUTCMonth() + 1).padStart(2, "0") + "."; };
 const mean = a => { const v = a.filter(x => x != null && !Number.isNaN(x)); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
@@ -308,8 +311,8 @@ function extraKpis(daily, from, to) {
   const P = META.profile, d = daily.filter(r => inRange(r.t, from, to));
   const lastAcwr = [...d].reverse().find(r => r.acwr != null);
   const a = lastAcwr ? lastAcwr.acwr : null;
-  const band = a == null ? "" : a < 0.8 ? "niedrig (Untertraining)" : a <= 1.3 ? "ausgewogen" : a <= 1.5 ? "erhöht" : "hoch";
-  const bcls = a == null ? "" : (a > 1.5 ? "bad" : a >= 0.8 && a <= 1.3 ? "good" : "");
+  const band = a == null ? "" : a < ACWR.low ? "niedrig (Untertraining)" : a <= ACWR.high ? "ausgewogen" : a <= ACWR.very_high ? "erhöht" : "hoch";
+  const bcls = a == null ? "" : (a > ACWR.very_high ? "bad" : a >= ACWR.low && a <= ACWR.high ? "good" : "");
   const warn = d.filter(r => r.rec_low).length;
   const warn14 = daily.filter(r => inRange(r.t, to - 13 * DAY, to) && r.rec_low).length;
   const pmNow = d.length ? d[d.length - 1] : null, pm7 = d.length > 7 ? d[d.length - 8] : null;
@@ -390,12 +393,12 @@ function makeCharts() {
       plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 0)}`, footer: dayFooter } } } }) });
   mk("c-acwr", { type: "line", data: { labels: [], datasets: [
-      { label: "Untergrenze 0,8", data: [], borderWidth: 0, pointRadius: 0 },
-      { label: "Richtbereich 0,8–1,3", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#009E7335", fill: "-1" },
+      { label: ACWR_LOW_LABEL, data: [], borderWidth: 0, pointRadius: 0 },
+      { label: `Richtbereich ${acwrRange()}`, data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#009E7335", fill: "-1" },
       { label: "ACWR (eigene Berechnung)", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25 },
       { label: "ACWR (Garmin)", data: [], borderColor: "#888", borderDash: [5, 4], borderWidth: 1.8, pointRadius: 0, tension: .25 },
       { label: "ACWR (nur gemessene Last)", data: [], borderColor: "#CC79A7", borderDash: [2, 3], borderWidth: 1.8, pointRadius: 0, tension: .25 }] },
-    options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze 0,8"]), { tooltip: { filter: i => i.dataset.label.startsWith("ACWR"), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 2)}`, footer: dayFooter } } }),
+    options: baseOpts({ plugins: Object.assign(noLegend([ACWR_LOW_LABEL]), { tooltip: { filter: i => i.dataset.label.startsWith("ACWR"), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 2)}`, footer: dayFooter } } }),
       scales: { x: gridX(false), y: { min: 0, grid: { color: css("--grid") } } } }) });
   mk("c-rhrbase", { type: "line", data: { labels: [], datasets: [
       { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0 },
@@ -507,7 +510,7 @@ function renderPmcNote(d) {
 function updateLoadCharts(d, L) {
   const un = r => r.unrecorded ? null : undefined;
   setData("c-load", L, [d.map(r => r.load_meas), d.map(r => r.load_est), d.map(r => r.acute_d), d.map(r => r.chronic_d)]);
-  setData("c-acwr", L, [d.map(() => 0.8), d.map(() => 1.3), d.map(r => r.acwr), d.map(r => r.ts_acwr), d.map(r => r.acwr_meas)]);
+  setData("c-acwr", L, [d.map(() => ACWR.low), d.map(() => ACWR.high), d.map(r => r.acwr), d.map(r => r.ts_acwr), d.map(r => r.acwr_meas)]);
   renderLoadNote(d);
   setData("c-pmc", L, [d.map(r => r.ctl), d.map(r => r.atl)]);
   charts["c-form"].data.datasets[0].backgroundColor = d.map(r => (r.tsb >= 0 ? "#56B4E9" : "#E69F00") + (r.pmc_gap || r.pmc_warmup ? "66" : ""));
@@ -534,7 +537,6 @@ function updateLoadCharts(d, L) {
     `Mittel aus Ruhepuls (erhöht), Schlaf-Score, Body-Battery-Höchstwert und HRV (jeweils gegen die eigene 28-Tage-Baseline, niedriger = schlechter). ` +
     `Die vier Signale überlappen und entsprechen etwa ${nf(META.rec_index.n_eff, 1)} unabhängigen; rot ab ${nf(META.rec_index.threshold, 1)}. Beschreibend, nicht an einem Ergebnis geprüft.`;
 }
-const HEAT_C = 30;   // Hitzetag (DWD): Höchsttemperatur ab 30 °C
 function updateWeather(d, L) {
   const W = META.weather, card = document.getElementById("weather-card");
   if (!W || !W.n_days || !state.showWeather) { card.style.display = "none"; return; }   // nur auf Wunsch (Checkbox im Kopf)
@@ -743,6 +745,7 @@ function init() {
   const sel = document.getElementById("f-group");
   groups.forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
   setupRange();
+  document.getElementById("acwr-range").textContent = acwrRange();
   sel.onchange = e => { state.group = e.target.value; refresh(); };
   document.getElementById("f-bad-label").textContent = `Nächte < ${MIN_SLEEP_H} h ausblenden`;
   document.getElementById("f-bad").onchange = e => { state.hideBad = e.target.checked; refresh(); };
