@@ -70,7 +70,7 @@ read_hr_cache <- function(path = F_HR) {
 activity_group <- function(type) {
   type <- tolower(as.character(type))
   case_when(
-    grepl("cycling|biking|ride", type)                          ~ "Rad",
+    grepl("cycling|biking|ride|e_bike", type)                   ~ "Rad",   # auch E-Bike (e_bike_fitness, e_bike_mountain)
     grepl("run|treadmill", type)                                ~ "Laufen",
     grepl("hiit|strength|cardio|fitness|training", type)        ~ "Gym / HIIT",
     grepl("walk|hik", type)                                     ~ "Gehen / Wandern",
@@ -87,10 +87,9 @@ max_na <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
 
 # Radfahrt im engen Sinn: Garmin-Typ "cycling". Hierauf beruhen das Zusammenfassen der Segmente (merge_rides), die
 # Pendel-Schätzung ohne Pulsdaten und die Ableitung der Pendel-Intensität. activity_group() ordnet breiter zu
-# (Regex cycling|biking|ride, also auch indoor_cycling, mountain_biking, road_biking): solche Fahrten zählen als "Rad",
-# werden aber nicht zusammengefasst und nicht als Pendelstrecke geschätzt. E-Bike-Typen (e_bike_fitness, e_bike_mountain)
-# treffen die Regex nicht und landen in anderen Gruppen. Das zu ändern ist hier an einer Stelle möglich;
-# in den echten Daten kommt bisher nur "cycling" vor.
+# (Regex cycling|biking|ride|e_bike, also auch indoor_cycling, mountain_biking, road_biking, e_bike_fitness,
+# e_bike_mountain): solche Fahrten zählen als "Rad", werden aber nicht zusammengefasst und nicht als Pendelstrecke
+# geschätzt. Das zu ändern ist hier an einer Stelle möglich; in den echten Daten kommt bisher nur "cycling" vor.
 is_ride_type <- function(type_key) type_key %in% "cycling"
 
 merge_rides <- function(acts, gap_min = RIDE_GAP_MIN, min_min = RIDE_MIN_MIN) {

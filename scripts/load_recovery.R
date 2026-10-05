@@ -3,7 +3,7 @@
 # (benötigt dplyr, tibble; setzt helpers.R voraus; wird per source() eingebunden)
 # =============================================================================
 # Benötigte Variablen in ~/.Renviron:
-#   BIRTHDAY="26-07-1974"   (TT-MM-JJJJ)      GENDER="male"|"female"
+#   BIRTHDAY="26-07-1974"   (TT-MM-JJJJ; Beispielwert, nicht echt)      GENDER="male"|"female"
 # Optional:
 #   HRMAX="190"   dein HFmax-Wert (am besten per Feldtest oder mit Brustgurt ermittelt); ohne
 #                 Angabe wird er nach Tanaka geschätzt (208 - 0.7 * Alter, Streuung etwa +-10 bpm).
@@ -329,6 +329,9 @@ recovery_index <- function(z, min_signals = REC_INDEX_MIN_SIGNALS) {
 # Aufbau: recovery_data() (eine Zeile je HIIT-/Nicht-HIIT-Tag mit den Werten des Folgetags),
 # recovery_model() (adjustierter Effekt je Kennwert) und recovery_design() (wie gut sind HIIT-
 # und Vergleichstage über die Messwochentage verteilt?).
+# Ausgeschlossen werden Tage mit unbekannter Last (unrecorded: Trainingstag) und Zeilen, deren Messtag (Folgetag)
+# annotiert ist (data/annotations.csv, z. B. Segeltörn mit Nachtwachen): Dort stammen die Werte nicht aus dem
+# gewöhnlichen Alltag. Ein annotierter Trainingstag mit bekannter Last bleibt, seine Folgenacht zählt.
 # Hinweis zur Methode: HIIT liegt auf wenigen Wochentagen, und der Wochentag der Messung beeinflusst
 # die Werte (z. B. Wochenende). Ein roher Gruppenvergleich ist deshalb konfundiert; das Modell
 # adjustiert für den Wochentag. Aussage bleibt ein Zusammenhang, kein Kausalbeweis.
@@ -344,11 +347,13 @@ recovery_data <- function(d) {
   sleep_ok <- !is.na(d$sleep_h) & !d$sleep_bad       # Nacht vorhanden und gültig
   has <- function(col) col %in% names(cl)
   ok  <- function(col) if (has(col)) ifelse(sleep_ok, cl[[col]], NA) else rep(NA_real_, nrow(d))
-  nx <- tibble(date = d$date - 1,
+  ann <- if ("ann_note" %in% names(d)) !is.na(d$ann_note) else rep(FALSE, nrow(d))   # annotierter Messtag
+  nx <- tibble(date = d$date - 1, ann_n = ann,
                sleep_score_n = ok("sleep_score"), deep_h_n = ok("deep_h"), bb_high_n = ok("bb_high"),
                resting_hr_n = if (has("resting_hr")) cl$resting_hr else rep(NA_real_, nrow(d)),
                hrv_n = ok("hrv_night"), sleep_hr_n = ok("sleep_hr"), ready_n = ok("ready_score"))
-  d |> filter(!unrecorded) |> select(date, hiit) |> inner_join(nx, by = "date") |> arrange(date) |>
+  d |> filter(!unrecorded) |> select(date, hiit) |> inner_join(nx, by = "date") |>
+    filter(!ann_n) |> select(-ann_n) |> arrange(date) |>
     mutate(wd = factor(format(date + 1, "%u"), levels = as.character(1:7)))   # Wochentag der Messung (Mo = 1)
 }
 

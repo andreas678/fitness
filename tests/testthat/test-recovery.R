@@ -82,3 +82,32 @@ test_that("recovery_model setzt den globalen Zufallszahlen-Zustand nicht zurück
   expect_false(any(grepl("set.seed", deparse(body(recovery_model)))))
   expect_false(any(grepl("set.seed", deparse(body(recovery_data)))))
 })
+
+# ---- Annotierte Tage ---------------------------------------------------------------------------
+test_that("recovery_data schließt Zeilen aus, deren Messtag annotiert ist", {
+  d <- sim_daily(60)
+  d$ann_note <- NA_character_
+  ann_days <- as.Date("2026-02-10") + 0:2                                      # Messtage 10.-12.2.
+  d$ann_note[d$date %in% ann_days] <- "Segeltörn"
+  x <- recovery_data(d)
+  expect_false(any((x$date + 1) %in% ann_days))                                # keine Zeile mit annotiertem Messtag
+  expect_false(as.Date("2026-02-09") %in% x$date)                              # Trainingstag 9.2.: Messtag 10.2. ist annotiert
+  expect_true(as.Date("2026-02-12") %in% x$date)                               # Trainingstag 12.2.: Messtag 13.2. gewöhnlich, Zeile bleibt
+  # genau drei Zeilen weniger als ohne Annotation
+  expect_equal(nrow(recovery_data(sim_daily(60))) - nrow(x), 3)
+})
+
+test_that("recovery_data: ohne ann_note-Spalte oder ohne annotierte Tage bleibt alles wie bisher", {
+  d <- sim_daily(60); x0 <- recovery_data(d)
+  d$ann_note <- NA_character_
+  expect_equal(recovery_data(d), x0)
+  expect_false("ann_n" %in% names(x0))                                         # Hilfsspalte wird nicht ausgegeben
+})
+
+test_that("recovery_data: ein annotierter Trainingstag mit bekannter Last bleibt, seine Folgenacht zählt", {
+  d <- sim_daily(60); d$ann_note <- NA_character_
+  d$ann_note[d$date == as.Date("2026-02-10")] <- "Nachtwache"                  # nur dieser Tag annotiert, Last bekannt
+  x <- recovery_data(d)
+  expect_true(as.Date("2026-02-10") %in% x$date)                               # Trainingstag annotiert, Messtag (11.2.) nicht
+  expect_false(as.Date("2026-02-09") %in% x$date)                              # Messtag 10.2. ist annotiert
+})
