@@ -114,7 +114,7 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
     <div class="card"><h3>Training Readiness (Morgenwert)</h3><div class="sub">Garmin-Score 0–100: unter 25 schlecht, 25–49 niedrig, 50–74 mittel, ab 75 hoch</div><div class="chartbox"><canvas id="c-ready"></canvas></div></div>
     <div class="card"><h3>Schlafenszeit und Aufwachzeit</h3><div class="sub">Uhrzeit des Einschlafens und Aufwachens</div><div class="chartbox"><canvas id="c-sleeptime"></canvas></div></div>
     <div class="card"><h3>Nächtliche Vitalwerte</h3><div class="sub">Balken: Hauttemperatur-Abweichung vom persönlichen Mittel (°C). Linien: SpO₂ im Schlaf (%)</div><div class="chartbox"><canvas id="c-vitals"></canvas></div></div>
-    <div class="card"><h3>Körpergewicht</h3><div class="sub">Wiegungen aus Garmin Connect</div><div class="chartbox"><canvas id="c-weight"></canvas></div></div>
+    <div class="card"><h3>Körpergewicht</h3><div class="sub">Punkte: einzelne Wiegungen aus Garmin Connect (Tagesschwankungen von 1 kg und mehr sind normal). Linie und Band: lokaler Trend mit 95-%-Konfidenzband, nur ab 8 Wiegungen</div><div class="chartbox"><canvas id="c-weight"></canvas></div></div>
   </section>
 
   <section class="card tablecard">
@@ -179,6 +179,28 @@ function range() {
 }
 const actT = a => tOf(a.start);
 
+// <weightChange>
+// Lineare Gewichtsänderung über die Zeitspanne der übergebenen Wiegungen (OLS) mit 95-%-Konfidenzintervall
+// (t-Quantil). null bei weniger als minN Wiegungen oder ohne Streuung der Zeitpunkte. Wiegungen streuen
+// täglich um 1 kg und mehr; die Autokorrelation der Reste bleibt bei so seltenen Wiegungen unberücksichtigt.
+function weightChange(points, minN = 6) {
+  const MS_DAY = 86400000;
+  const p = [...points].sort((a, b) => a.t - b.t), n = p.length;
+  if (n < minN) return null;
+  const x = p.map(q => (q.t - p[0].t) / MS_DAY), y = p.map(q => q.kg);
+  const mx = x.reduce((s, v) => s + v, 0) / n, my = y.reduce((s, v) => s + v, 0) / n;
+  const sxx = x.reduce((s, v) => s + (v - mx) ** 2, 0);
+  if (sxx === 0) return null;
+  const slope = x.reduce((s, v, i) => s + (v - mx) * (y[i] - my), 0) / sxx;
+  const rss = y.reduce((s, v, i) => s + (v - my - slope * (x[i] - mx)) ** 2, 0), df = n - 2;
+  const se = Math.sqrt(rss / df / sxx);
+  const T = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.160, 2.145, 2.131, 2.120,
+             2.110, 2.101, 2.093, 2.086, 2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042];
+  const tc = df <= 30 ? T[df - 1] : 2.0, span = x[n - 1];
+  return { n, span, change: slope * span, lo: (slope - tc * se) * span, hi: (slope + tc * se) * span };
+}
+// </weightChange>
+
 // ---- KPIs ----------------------------------------------------------------------
 function kpiValues(daily, from, to) {
   const d = daily.filter(r => inRange(r.t, from, to));
@@ -235,12 +257,17 @@ function extraKpis(daily, from, to) {
   const rdy = lastOf("ready_score"), vo2 = lastOf("vo2max");
   const wIn = WEIGHT.filter(w => inRange(tOf(w.date), from, to)), wAll = WEIGHT.filter(w => tOf(w.date) <= to);
   const wLast = wAll.length ? wAll[wAll.length - 1] : null, wFirst = wIn.length ? wIn[0] : null;
-  const wDiff = wLast && wFirst && wIn.length > 1 ? wLast.weight_kg - wFirst.weight_kg : null;
+  const wTrend = weightChange(wIn.map(w => ({ t: tOf(w.date), kg: w.weight_kg })));   // null: zu wenige Wiegungen im Zeitraum
+  const sgn = v => (v > 0 ? "+" : "") + nf(v, 1);
+  const wText = wTrend
+    ? (wTrend.lo > 0 || wTrend.hi < 0 ? `Trend ${sgn(wTrend.change)} kg [${sgn(wTrend.lo)}; ${sgn(wTrend.hi)}] in ${nf(wTrend.span)} Tagen`
+                                      : `keine belastbare Veränderung (${sgn(wTrend.change)} kg [${sgn(wTrend.lo)}; ${sgn(wTrend.hi)}])`) + ` · ${wTrend.n} Wiegungen`
+    : `${wIn.length} Wiegung${wIn.length === 1 ? "" : "en"} im Zeitraum: zu wenige für einen Trend` + (wLast ? " · letzte " + wLast.date.slice(5).split("-").reverse().join(".") : "");
   const hasHrv = d.some(r => r.hrv_night != null), hasReady = d.some(r => r.ready_score != null);
   const more = (hasHrv ? `<div class="kpi"><div class="l">HRV (Ø 7 Nächte)</div><div class="v">${nf(hrvAvg)}<small>ms</small></div><div class="d ${hrvCls}">${hrvRow ? "letzte Nacht " + nf(hrvRow.hrv_night) + " (Normal " + nf(hrvRow.hrv_base_low) + "–" + nf(hrvRow.hrv_base_high) + ")" : ""}</div></div>` : "") +
     (hasReady ? `<div class="kpi"><div class="l">Training Readiness</div><div class="v">${nf(rdy)}</div><div class="d">${lastOf("ready_level") || ""}${lastOf("recovery_h") != null ? " · Erholung " + nf(lastOf("recovery_h")) + " h" : ""}</div></div>` : "") +
     (vo2 != null ? `<div class="kpi"><div class="l">VO₂max</div><div class="v">${nf(vo2, 1)}<small>ml/kg/min</small></div><div class="d"></div></div>` : "") +
-    (wLast ? `<div class="kpi"><div class="l">Gewicht</div><div class="v">${nf(wLast.weight_kg, 1)}<small>kg</small></div><div class="d">${wDiff != null ? (wDiff > 0 ? "+" : "") + nf(wDiff, 1) + " kg im Zeitraum" : "letzte Wiegung " + wLast.date.slice(5).split("-").reverse().join(".")}</div></div>` : "");
+    (wLast ? `<div class="kpi"><div class="l">Gewicht</div><div class="v">${nf(wLast.weight_kg, 1)}<small>kg</small></div><div class="d">${wText}</div></div>` : "");
   return more + `<div class="kpi"><div class="l">ACWR aktuell</div><div class="v">${nf(a, 2)}</div><div class="d ${bcls}">${band}</div></div>` +
     `<div class="kpi"><div class="l">Tage mit ≥ 2 Warn-Signalen (von 4)</div><div class="v">${warn}</div><div class="d ${warn14 >= 3 ? "bad" : ""}">${warn14} in den letzten 14 Tagen</div></div>` +
     `<div class="kpi"><div class="l">HFmax (Zonen-Basis)</div><div class="v">${P.hrmax}<small>bpm</small></div><div class="d ${hrLow ? "bad" : ""}">${P.hrmax_source}${hrLow ? " · vermutlich zu niedrig (30-s-Spitze bis " + nf(P.obs_max) + ")" : ""}</div></div>`;
@@ -340,8 +367,12 @@ function makeCharts() {
       { type: "line", label: "SpO₂ min (%)", data: [], borderColor: "#56B4E9", borderWidth: 1.5, pointRadius: 0, yAxisID: "y2", order: 1 }] },
     options: baseOpts({ scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "°C" } },
       y2: { position: "right", min: 80, max: 100, grid: { display: false }, title: { display: true, text: "% SpO₂" } } } }) });
-  mk("c-weight", { type: "line", data: { labels: [], datasets: [{ label: "Gewicht (kg)", data: [], borderColor: "#1B7F79", backgroundColor: "#1B7F79", pointRadius: 4, borderWidth: 2, spanGaps: true, tension: .2 }] },
-    options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${nf(c.parsed.y, 1)} kg` } } },
+  mk("c-weight", { type: "line", data: { labels: [], datasets: [
+      { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0, spanGaps: true },
+      { label: "Trend 95 %-Band", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#1B7F7933", fill: "-1", spanGaps: true },
+      { label: "Trend", data: [], borderColor: "#1B7F79", borderWidth: 2.5, pointRadius: 0, tension: .25, spanGaps: true },
+      { label: "Wiegung", data: [], showLine: false, borderColor: "#1B7F79", backgroundColor: "#1B7F79", pointRadius: 4 }] },
+    options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze"]), { tooltip: { filter: i => ["Trend", "Wiegung"].includes(i.dataset.label), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 1)} kg` } } }),
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "kg" } } } }) });
   mk("c-ride", { type: "bar", data: { labels: [], datasets: [{ label: "km", data: [], backgroundColor: GROUP_COLORS["Rad"] }] },
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${nf(c.parsed.y, 1)} km` } } },
@@ -385,7 +416,9 @@ function updateLoadCharts(d, L) {
   setData("c-sleeptime", L, [d.map(r => r.bed_h), d.map(r => r.wake_h)]);
   setData("c-vitals", L, [d.map(r => r.skin_temp_dev), d.map(r => r.spo2_avg), d.map(r => r.spo2_low)]);
   const wmap = new Map(WEIGHT.map(w => [w.date, w.weight_kg]));
-  setData("c-weight", L, [d.map(r => wmap.has(r.date) ? wmap.get(r.date) : null)]);
+  const tmap = new Map(WEIGHT_TREND.map(w => [w.date, w]));
+  setData("c-weight", L, [d.map(r => tmap.has(r.date) ? tmap.get(r.date).lo : null), d.map(r => tmap.has(r.date) ? tmap.get(r.date).hi : null),
+    d.map(r => tmap.has(r.date) ? tmap.get(r.date).fit : null), d.map(r => wmap.has(r.date) ? wmap.get(r.date) : null)]);
   const f = charts["c-flags"]; f.data.datasets[0].backgroundColor = d.map(r => FLAG_COLORS[r.flags] || FLAG_COLORS[3]);
   setData("c-flags", L, [d.map(r => r.flags)]);
 }

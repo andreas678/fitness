@@ -111,6 +111,10 @@ acts <- acts_s |>
 weights <- if (!is.null(weight_raw)) weight_raw |>
   transmute(date = format(date), weight_kg = round(weight_kg, 1)) else tibble(date = character(), weight_kg = numeric())
 
+wtrend <- if (!is.null(weight_raw)) weight_trend(weight_raw) else NULL   # NULL bei zu wenigen Wiegungen
+weights_trend <- if (is.null(wtrend)) tibble(date = character(), fit = numeric(), lo = numeric(), hi = numeric()) else
+  wtrend |> transmute(date = format(date), fit = round(fit, 2), lo = round(lo, 2), hi = round(hi, 2))
+
 hr_sessions <- acts_s |> filter(!is.na(max_hr))
 peak <- hr_peak_stats(acts_s, hr_raw, prof)
 meta <- list(
@@ -137,6 +141,7 @@ payload <- paste0(
   "const DAILY = ", to_json(daily), ";\n",
   "const ACTS = ",  to_json(acts),  ";\n",
   "const WEIGHT = ", to_json(weights), ";\n",
+  "const WEIGHT_TREND = ", to_json(weights_trend), ";\n",
   "const RECOVERY = ", to_json(mutate(recov, across(where(is.numeric), ~ round(.x, 4)))), ";\n",
   "const META = ", toJSON(meta, auto_unbox = TRUE, dataframe = "rows", na = "null"), ";\n")
 

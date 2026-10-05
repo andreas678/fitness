@@ -205,3 +205,24 @@ resolve_rhr_ref <- function(ref, candidate, env = NA_real_, recalc = FALSE) {
     return(list(value = ref$rhr_ref, source = "gespeichert", save = FALSE))
   list(value = candidate, source = "neu berechnet", save = TRUE)
 }
+
+# ---- Gewichtstrend ----------------------------------------------------------------------------------
+# Wiegungen sind selten (hier etwa alle 10 Tage) und streuen von Tag zu Tag um 1 kg und mehr
+# (Flüssigkeit, Tageszeit). Deshalb kein Einzelwert-Vergleich, sondern ein lokaler Trend (loess,
+# Grad 1) mit 95-%-Band für den Verlauf; liefert NULL bei weniger als min_n Wiegungen. Das Band gilt
+# für den Trend (Mittelwert), nicht für einzelne Wiegungen. Nur innerhalb des Wiegezeitraums
+# (keine Extrapolation); mehrere Wiegungen am selben Tag werden gemittelt.
+weight_trend <- function(w, min_n = 8, span = 0.75) {
+  w <- w[!is.na(w$weight_kg) & !is.na(w$date), ]
+  if (nrow(w) == 0) return(NULL)
+  w <- w |> dplyr::group_by(date = as.Date(date)) |> dplyr::summarise(weight_kg = mean(weight_kg), .groups = "drop")
+  if (nrow(w) < min_n) return(NULL)
+  x <- as.numeric(w$date)
+  lo <- stats::loess(weight_kg ~ x, data = data.frame(x = x, weight_kg = w$weight_kg), degree = 1,
+                     span = min(1, max(span, 6 / nrow(w))), family = "gaussian")
+  grid <- seq(min(w$date), max(w$date), by = "day")
+  pr <- stats::predict(lo, data.frame(x = as.numeric(grid)), se = TRUE)
+  tc <- stats::qt(0.975, pr$df)
+  tibble::tibble(date = grid, fit = as.numeric(pr$fit),
+                 lo = as.numeric(pr$fit - tc * pr$se.fit), hi = as.numeric(pr$fit + tc * pr$se.fit))
+}

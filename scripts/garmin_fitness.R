@@ -497,9 +497,15 @@ if (nrow(act_hr) > 0) {
     scale_size_continuous(range = c(1.5, 5), name = "Dauer (min)") +
     x_date +
     labs(title = "Durchschnittspuls je Aktivität", x = NULL, y = "bpm")
-  if (nrow(act_hr) >= 8)
-    p <- p + geom_smooth(aes(group = 1), method = "loess", formula = y ~ x,
-                         se = FALSE, colour = "grey30", linewidth = 0.7)
+  # Trend je Aktivitätsgruppe statt über alle Typen: ein gemeinsamer Trend mischt Gruppen mit sehr
+  # verschiedenem Puls (Zusammensetzungseffekt). Nur Gruppen mit mindestens 8 Einheiten; "Sonstiges"
+  # ist ein Sammelbecken (Atemübungen, Mobility, Seilspringen ...) und bekommt keine Linie.
+  trend_groups <- act_hr |> filter(group != "Sonstiges") |> count(group) |> filter(n >= 8) |> pull(group)
+  if (length(trend_groups) > 0) {
+    p <- p + geom_smooth(data = filter(act_hr, group %in% trend_groups), aes(colour = group, group = group),
+                         method = "loess", formula = y ~ x, se = FALSE, linewidth = 0.8, na.rm = TRUE)
+    p <- p + labs(subtitle = "Linien: Trend je Aktivitätsgruppe (ab 8 Einheiten, ohne \"Sonstiges\")")
+  }
   plots$aktivitaeten_puls <- p
 }
 
