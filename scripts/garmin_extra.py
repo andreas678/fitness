@@ -116,3 +116,44 @@ def fetch_zones(api, activity_id):
         out["z%d_s" % i] = zi.get("secsInZone")
         out["z%d_low" % i] = zi.get("zoneLowBoundary")
     return out
+
+
+def peak_hr_from_details(d, window_s=30):
+    """Spitzenpuls aus der Herzfrequenz-Zeitreihe von get_activity_details.
+
+    hr_peak30: höchstes gleitendes Mittel über window_s Sekunden (zeitbasiert, Abtastabstand
+    schwankt zwischen 1 und 16 s). Ein einzelner Ausreißer wird so geglättet, ein anhaltender
+    Anstieg nicht; ob ein anhaltender Wert plausibel ist, entscheidet die Auswertung in R.
+    hr_max_raw: höchster Einzelwert. None, wenn keine Herzfrequenz-Zeitreihe vorhanden ist;
+    hr_peak30 ist None, wenn die Aufzeichnung kürzer als das Fenster ist.
+    """
+    desc = {x.get("key"): x.get("metricsIndex") for x in (d or {}).get("metricDescriptors") or []}
+    hi, ti = desc.get("directHeartRate"), desc.get("sumElapsedDuration")
+    if hi is None or ti is None:
+        return None
+    pts = []
+    for r in (d or {}).get("activityDetailMetrics") or []:
+        m = r.get("metrics") or []
+        if len(m) > max(hi, ti) and m[hi] is not None and m[ti] is not None:
+            pts.append((float(m[ti]), float(m[hi])))
+    if not pts:
+        return None
+    pts.sort()
+    t = [a for a, _ in pts]
+    h = [b for _, b in pts]
+    peak, j, s = None, 0, 0.0
+    for k in range(len(pts)):
+        s += h[k]
+        while t[k] - t[j] > window_s:
+            s -= h[j]
+            j += 1
+        if t[k] - t[0] >= window_s:
+            mean = s / (k - j + 1)
+            peak = mean if peak is None else max(peak, mean)
+    return {"hr_peak30": None if peak is None else round(peak, 1), "hr_max_raw": max(h), "n_samples": len(pts)}
+
+
+def fetch_hr_peak(api, activity_id):
+    """Spitzenpuls einer Aktivität (siehe peak_hr_from_details); None bei Fehler oder ohne Pulsdaten."""
+    d = _try(api.get_activity_details, str(activity_id), 4000)
+    return peak_hr_from_details(d) if d else None

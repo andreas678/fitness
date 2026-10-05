@@ -5,8 +5,9 @@
 # Benötigte Variablen in ~/.Renviron:
 #   BIRTHDAY="26-07-1974"   (TT-MM-JJJJ)      GENDER="male"|"female"
 # Optional:
-#   HRMAX="190"   gemessene maximale Herzfrequenz; ohne Angabe wird sie nach
-#                 Tanaka geschätzt (208 - 0.7 * Alter, Streuung etwa +-10 bpm).
+#   HRMAX="190"   dein HFmax-Wert (am besten per Feldtest oder mit Brustgurt ermittelt); ohne
+#                 Angabe wird er nach Tanaka geschätzt (208 - 0.7 * Alter, Streuung etwa +-10 bpm).
+#                 Das Dashboard prüft ihn gegen die 30-Sekunden-Spitzenwerte der Einheiten.
 # Die Werte werden nur zur Berechnung genutzt; das Geburtsdatum wird nicht ausgegeben.
 # =============================================================================
 
@@ -17,17 +18,40 @@ athlete_profile <- function(rhr_ref, today = Sys.Date()) {
   age <- if (is.na(bd)) NA_real_ else floor(as.numeric(today - bd) / 365.2425)
   hr_env <- suppressWarnings(as.numeric(Sys.getenv("HRMAX")))
   if (is.finite(hr_env) && hr_env > 0) {
-    hrmax <- hr_env; src <- "gemessen"
+    hrmax <- hr_env; src <- "eingestellt via HRMAX"   # nicht automatisch "gemessen": Wert stammt aus der Konfiguration
   } else if (!is.na(age)) {
     hrmax <- round(208 - 0.7 * age); src <- "geschätzt (Tanaka)"
   } else stop("BIRTHDAY (TT-MM-JJJJ) oder HRMAX in ~/.Renviron setzen.")
   male <- !tolower(Sys.getenv("GENDER")) %in% c("female", "f", "w", "weiblich")
   hrr  <- hrmax - rhr_ref
-  list(age = age, male = male, hrmax = hrmax, hrmax_source = src, rhr_ref = rhr_ref,
+  # Plausibilitätsgrenze für Pulsspitzen: Tanaka-Schätzung + 30 bpm (etwa 3 Streuungen der individuellen
+  # HFmax). Ein 30-Sekunden-Mittel darüber gilt als Artefakt (z. B. optischer Sensor rastet auf die Bewegung ein).
+  hr_ceiling <- if (is.na(age)) NA_real_ else round(208 - 0.7 * age) + 30
+  list(age = age, male = male, hrmax = hrmax, hrmax_source = src, hr_ceiling = hr_ceiling, rhr_ref = rhr_ref,
        trimp_b = if (male) 1.92 else 1.67,                   # Banister-TRIMP-Faktor
        zones = tibble(zone = paste0("Z", 1:5),
                       lo = round(rhr_ref + hrr * c(.5, .6, .7, .8, .9)),
                       hi = round(rhr_ref + hrr * c(.6, .7, .8, .9, 1))))
+}
+
+# ---- Spitzenpuls prüfen: HFmax gegen die 30-Sekunden-Spitzen der Einheiten ---------------------------
+# acts: Aktivitäten mit max_hr; hr: Cache garmin_activity_hr.csv (activity_id, hr_peak30, hr_max_raw) oder NULL.
+#   n_exceed_raw  Einheiten, deren Einzelwert-Maximum über HFmax liegt (anfällig für Sensor-Ausreißer)
+#   n_exceed      Einheiten mit 30-s-Spitze über HFmax, aber unter der Plausibilitätsgrenze
+#   n_artifact    Einheiten mit 30-s-Spitze über der Plausibilitätsgrenze (vermutlich Artefakt)
+#   obs_max       höchste 30-s-Spitze ohne Artefakte: HFmax kann nicht darunter liegen
+hr_peak_stats <- function(acts, hr, p) {
+  ceil <- if (is.null(p$hr_ceiling) || is.na(p$hr_ceiling)) Inf else p$hr_ceiling
+  with_hr <- acts[!is.na(acts$max_hr), ]
+  out <- list(n_hr = nrow(with_hr), n_exceed_raw = sum(with_hr$max_hr > p$hrmax), n_peak = 0L,
+              n_exceed = NA_integer_, n_artifact = NA_integer_, obs_max = NA_real_, ceiling = p$hr_ceiling)
+  if (is.null(hr) || nrow(hr) == 0) return(out)
+  pk <- hr$hr_peak30[hr$activity_id %in% with_hr$activity_id]; pk <- pk[!is.na(pk)]
+  out$n_peak     <- length(pk)
+  out$n_exceed   <- sum(pk > p$hrmax & pk <= ceil)
+  out$n_artifact <- sum(pk > ceil)
+  out$obs_max    <- if (any(pk <= ceil)) max(pk[pk <= ceil]) else NA_real_
+  out
 }
 
 # ---- Belastung je Einheit ----------------------------------------------------------

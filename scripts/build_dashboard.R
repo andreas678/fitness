@@ -40,6 +40,8 @@ read_opt <- function(f, ...) if (file.exists(f)) read_csv(f, show_col_types = FA
 zones_raw  <- read_opt(here("data", "garmin_activity_zones.csv"),
                        col_types = cols(activity_id = col_character(), .default = col_double()))
 weight_raw <- read_opt(here("data", "garmin_weight.csv"))
+hr_raw     <- read_opt(here("data", "garmin_activity_hr.csv"),   # Spitzenpuls aus der Pulskurve (30-s-Mittel)
+                       col_types = cols(activity_id = col_character(), .default = col_double()))
 
 # Profil, Belastung, Erholungs-Signale (siehe load_recovery.R)
 rhr_ref <- median(clean_daily(daily_raw)$resting_hr, na.rm = TRUE)   # ohne Ruhepuls-Artefakte
@@ -92,6 +94,7 @@ weights <- if (!is.null(weight_raw)) weight_raw |>
   transmute(date = format(date), weight_kg = round(weight_kg, 1)) else tibble(date = character(), weight_kg = numeric())
 
 hr_sessions <- acts_s |> filter(!is.na(max_hr))
+peak <- hr_peak_stats(acts_s, hr_raw, prof)
 meta <- list(
   built = format(Sys.time(), "%d.%m.%Y %H:%M"),
   recovery_design = recov_design,
@@ -108,7 +111,8 @@ meta <- list(
   profile = list(age = prof$age, hrmax = prof$hrmax, hrmax_source = prof$hrmax_source,
                  rhr_ref = prof$rhr_ref, zones = prof$zones,
                  n_hr_sessions = nrow(hr_sessions),
-                 n_exceed = sum(hr_sessions$max_hr > prof$hrmax)))
+                 n_peak = peak$n_peak, n_exceed = peak$n_exceed, n_exceed_raw = peak$n_exceed_raw,
+                 n_artifact = peak$n_artifact, obs_max = peak$obs_max, hr_ceiling = prof$hr_ceiling))
 
 to_json <- function(x) toJSON(x, dataframe = "rows", na = "null", digits = 3, auto_unbox = TRUE)
 payload <- paste0(
@@ -142,8 +146,13 @@ message("Sensitivität der Gesamt-TRIMP (jeweils eine Annahme variiert):")
 for (i in seq_len(nrow(sens)))
   message(sprintf("  %-10s %6.2f -> TRIMP %5.0f (%2.0f %% geschätzt)", sens$parameter[i], sens$value[i],
                   sens$trimp_total[i], sens$share_est[i] * 100))
-message(sprintf("Sessions mit Max-Puls über HFmax: %d von %d (HFmax prüfen!)",
-                meta$profile$n_exceed, meta$profile$n_hr_sessions))
+message(sprintf("Einheiten mit Puls: %d; Einzelwert-Maximum über HFmax: %d", peak$n_hr, peak$n_exceed_raw))
+if (peak$n_peak > 0) {
+  message(sprintf("  30-s-Spitze über HFmax (%d bpm): %d von %d Einheiten mit Pulskurve; Artefakt-Verdacht (> %d bpm): %d; höchste 30-s-Spitze ohne Artefakte: %.0f bpm",
+                  prof$hrmax, peak$n_exceed, peak$n_peak, prof$hr_ceiling, peak$n_artifact, peak$obs_max))
+  if (!is.na(peak$obs_max) && peak$obs_max > prof$hrmax) message("  -> HFmax vermutlich zu niedrig: per Feldtest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen.")
+}
+if (peak$n_peak < peak$n_hr) message(sprintf("  Pulskurve für %d von %d Einheiten vorhanden (der Rest: garmin_fitness.R noch nicht gelaufen oder bei Garmin nicht verfügbar).", peak$n_peak, peak$n_hr))
 message(sprintf("Letzte 14 Tage: %d Tage mit >= 2 Erholungs-Signalen, ACWR aktuell %.2f",
                 sum(last$flags >= 2), tail(na.omit(dl$acwr), 1)))
 message(sprintf("Dashboard geschrieben: %s (%d Tage, %d Aktivitäten, %.0f kB)",

@@ -24,6 +24,7 @@
 #   data/garmin_daily.csv        Tageswerte (Schritte, Ruhepuls, Schlaf, Body Battery …)
 #   data/garmin_activities.csv   Einzelne Aktivitäten
 #   data/garmin_activity_zones.csv  Zeit in Herzfrequenzzonen je Aktivität (nur mit Pulsdaten)
+#   data/garmin_activity_hr.csv  Spitzenpuls je Aktivität (30-Sekunden-Mittel und Einzelwert, aus der Pulskurve)
 #   data/garmin_weight.csv       Wiegungen (Gewicht, BMI, falls vorhanden Körperfett)
 #   _outputs/*.png               Einzelgrafiken + fitness_dashboard.png
 # =============================================================================
@@ -71,6 +72,7 @@ F_DAILY <- file.path(DIR_DATA, "garmin_daily.csv")
 F_ACT   <- file.path(DIR_DATA, "garmin_activities.csv")
 F_WEIGHT <- file.path(DIR_DATA, "garmin_weight.csv")
 F_ZONES  <- file.path(DIR_DATA, "garmin_activity_zones.csv")
+F_HR     <- file.path(DIR_DATA, "garmin_activity_hr.csv")
 PREFIX  <- if (DEMO) "demo_" else ""
 
 GROUP_COLORS <- c(
@@ -310,6 +312,26 @@ update_zones <- function(api, acts) {
   out
 }
 
+# Spitzenpuls je Aktivität mit Pulsdaten aus der Pulskurve: einmal holen und cachen (ein Aufruf je Einheit)
+update_hr <- function(api, acts) {
+  old <- if (!REFRESH && file.exists(F_HR))
+    read_csv(F_HR, show_col_types = FALSE, col_types = cols(activity_id = col_character(), .default = col_double())) else NULL
+  ids <- acts$activity_id[!is.na(acts$avg_hr)]
+  todo <- setdiff(ids, if (is.null(old)) character() else old$activity_id)
+  message(sprintf("Spitzenpuls: %d Aktivitäten nachladen …", length(todo)))
+  rows <- vector("list", length(todo))
+  for (i in seq_along(todo)) {
+    r <- tryCatch(fetch_hr_peak(api, todo[i]), error = function(e) NULL)
+    if (!is.null(r)) rows[[i]] <- as_tibble(c(list(activity_id = todo[i]),
+                                              lapply(r, function(v) if (is.null(v)) NA_real_ else num(v))))
+    if (i %% 25 == 0) message(sprintf("  %d/%d", i, length(todo)))
+    Sys.sleep(0.3)
+  }
+  out <- bind_rows(old, bind_rows(rows))
+  if (!is.null(out) && nrow(out) > 0) write_csv(out, F_HR)
+  out
+}
+
 # ---- 4. Demo-Daten (nur --demo) ----------------------------------------------
 demo_data <- function() {
   set.seed(42)
@@ -362,6 +384,7 @@ if (DEMO) {
     acts  <- update_activities(api)
     invisible(update_weight(api))
     invisible(update_zones(api, acts))
+    invisible(update_hr(api, acts))
   } else {
     daily <- read_daily_cache(); acts <- read_act_cache()
   }

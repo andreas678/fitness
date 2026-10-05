@@ -228,7 +228,7 @@ function extraKpis(daily, from, to) {
   const bcls = a == null ? "" : (a > 1.5 ? "bad" : a >= 0.8 && a <= 1.3 ? "good" : "");
   const warn = d.filter(r => r.flags >= 2).length;
   const warn14 = daily.filter(r => inRange(r.t, maxT - 13 * DAY, maxT) && r.flags >= 2).length;
-  const share = P.n_hr_sessions ? P.n_exceed / P.n_hr_sessions : 0;
+  const hrLow = P.obs_max != null && P.obs_max > P.hrmax;   // 30-s-Spitze über HFmax: der Wert kann nicht stimmen
   const lastOf = k => { const r = [...d].reverse().find(x => x[k] != null); return r ? r[k] : null; };
   const hrvAvg = mean(d.slice(-7).map(r => r.hrv_night)), hrvRow = [...d].reverse().find(r => r.hrv_night != null);
   const hrvCls = hrvRow ? (hrvRow.hrv_night < hrvRow.hrv_base_low ? "bad" : hrvRow.hrv_night >= hrvRow.hrv_base_low ? "good" : "") : "";
@@ -243,7 +243,7 @@ function extraKpis(daily, from, to) {
     (wLast ? `<div class="kpi"><div class="l">Gewicht</div><div class="v">${nf(wLast.weight_kg, 1)}<small>kg</small></div><div class="d">${wDiff != null ? (wDiff > 0 ? "+" : "") + nf(wDiff, 1) + " kg im Zeitraum" : "letzte Wiegung " + wLast.date.slice(5).split("-").reverse().join(".")}</div></div>` : "");
   return more + `<div class="kpi"><div class="l">ACWR aktuell</div><div class="v">${nf(a, 2)}</div><div class="d ${bcls}">${band}</div></div>` +
     `<div class="kpi"><div class="l">Tage mit ≥ 2 Warn-Signalen (von 4)</div><div class="v">${warn}</div><div class="d ${warn14 >= 3 ? "bad" : ""}">${warn14} in den letzten 14 Tagen</div></div>` +
-    `<div class="kpi"><div class="l">HFmax (Zonen-Basis)</div><div class="v">${P.hrmax}<small>bpm</small></div><div class="d ${share > 0.15 ? "bad" : ""}">${P.hrmax_source}${share > 0.15 ? " · zu niedrig?" : ""}</div></div>`;
+    `<div class="kpi"><div class="l">HFmax (Zonen-Basis)</div><div class="v">${P.hrmax}<small>bpm</small></div><div class="d ${hrLow ? "bad" : ""}">${P.hrmax_source}${hrLow ? " · vermutlich zu niedrig (30-s-Spitze bis " + nf(P.obs_max) + ")" : ""}</div></div>`;
 }
 
 // ---- Charts --------------------------------------------------------------------
@@ -423,13 +423,18 @@ function renderZones() {
     rows = P.zones.map(z => { const n = inR.filter(a => a.zone === z.zone).length; return `<tr><td>${z.zone}</td><td class="num">${z.lo}–${z.hi}</td><td class="num">${n}</td><td class="num"></td></tr>`; }).join("");
     note1 = "Zonen nach Karvonen aus Durchschnittspuls je Einheit (Zeit in Zonen nicht verfügbar).";
   }
-  const share = P.n_hr_sessions ? Math.round(P.n_exceed / P.n_hr_sessions * 100) : 0;
-  const diff = G ? ` Dein HFmax-Wert: ${P.hrmax} bpm (${P.hrmax_source}); Garmin nutzt ${G.hrmax} bpm.` : "";
+  const hrLow = P.obs_max != null && P.obs_max > P.hrmax, pct = P.n_peak ? Math.round(P.n_exceed / P.n_peak * 100) : 0;
+  const diff = G ? ` Dein HFmax-Wert: ${P.hrmax} bpm (${P.hrmax_source}); Garmin nutzt ${G.hrmax} bpm. Die Garmin-Zonen (Prozent von Garmins HFmax) und die Karvonen-Zonen (Herzfrequenzreserve) sind zwei verschiedene Systeme; die Belastung (TRIMP) nutzt die Herzfrequenzreserve mit deinem HFmax-Wert.` : "";
   document.getElementById("zones-card").innerHTML = `<h3>Herzfrequenz-Zonen</h3>
     <div class="sub">Alter ${P.age}, Ruhe-HF ${P.rhr_ref} bpm. ${G ? "Minuten im ausgewählten Zeitraum" : "Einheiten im Zeitraum"}</div>
     <table class="mini"><thead><tr><th>Zone</th><th>bpm</th><th>${G ? "Minuten" : "Einheiten"}</th><th>Anteil</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="note">${note1}${diff}</div>
-    <div class="note ${share > 15 ? "warn" : ""}">${P.n_exceed} von ${P.n_hr_sessions} Einheiten (${share} %) hatten einen Spitzenpuls über dem HFmax-Wert (${P.hrmax} bpm).${share > 15 ? " HFmax vermutlich zu niedrig oder Handgelenk-Sensor mit Ausreißern: per Belastungstest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen." : ""}</div>`;
+    <div class="note ${hrLow ? "warn" : ""}">${P.n_peak > 0
+      ? `${P.n_exceed} von ${P.n_peak} Einheiten mit Pulskurve (${pct} %) hatten eine 30-Sekunden-Spitze über dem HFmax-Wert (${P.hrmax} bpm), höchster Wert ${nf(P.obs_max)} bpm.` +
+        (P.n_artifact ? ` ${P.n_artifact} Einheit${P.n_artifact > 1 ? "en" : ""} mit Spitze über ${P.hr_ceiling} bpm ${P.n_artifact > 1 ? "gelten" : "gilt"} als Artefakt des Handgelenk-Sensors.` : "") +
+        (hrLow ? " HFmax vermutlich zu niedrig: per Feldtest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen." : "") +
+        ` Einzelwert-Maximum über HFmax: ${P.n_exceed_raw} von ${P.n_hr_sessions} (anfällig für Sensor-Ausreißer).`
+      : `${P.n_exceed_raw} von ${P.n_hr_sessions} Einheiten hatten einen Einzelwert über dem HFmax-Wert (${P.hrmax} bpm); ohne Pulskurve nicht unterscheidbar von Sensor-Ausreißern.`}</div>`
 }
 function updateCharts(daily) {
   const { from, to } = range();
