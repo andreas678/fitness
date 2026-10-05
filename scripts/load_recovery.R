@@ -3,7 +3,7 @@
 # (benötigt dplyr, tibble; setzt helpers.R voraus; wird per source() eingebunden)
 # =============================================================================
 # Benötigte Variablen in ~/.Renviron:
-#   BIRTHDAY="26-07-1974"   (TT-MM-JJJJ)      GENDER="male"|"female"
+#   BIRTHDAY="26-07-1974"   (TT-MM-JJJJ; Beispielwert, nicht echt)      GENDER="male"|"female"
 # Optional:
 #   HRMAX="190"   dein HFmax-Wert (am besten per Feldtest oder mit Brustgurt ermittelt); ohne
 #                 Angabe wird er nach Tanaka geschätzt (208 - 0.7 * Alter, Streuung etwa +-10 bpm).
