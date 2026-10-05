@@ -19,6 +19,12 @@ test_that("adaptation_trends findet eine bekannte Steigung des Ruhepulses", {
   expect_equal(r$verdict, "fallend"); expect_equal(r$n_weeks, 12); expect_equal(r$slope_unit, "bpm/Woche")
 })
 
+test_that("adaptation_trends nennt das Wochenfenster (12 Montage bis zur letzten vollständigen Woche)", {
+  w <- adaptation_trends(mk_tr(), today = TODAY)$window
+  expect_equal(w$last_week, as.Date("2026-09-28")); expect_equal(w$first_week, as.Date("2026-07-13"))
+  expect_true(is.na(adaptation_trends(mk_tr()[0, ], today = TODAY)$window$last_week))
+})
+
 test_that("adaptation_trends meldet bei flacher Reihe keinen klaren Trend", {
   r <- tr_of(adaptation_trends(mk_tr(slope = 0, sd = 1, seed = 7), today = TODAY), "resting_hr")
   expect_true(r$lo < 0 && 0 < r$hi); expect_equal(r$verdict, "kein klarer Trend")

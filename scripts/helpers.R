@@ -247,7 +247,8 @@ adaptation_trends <- function(daily, weeks = 12, min_days = 4, min_weeks = 6, ma
     weekly = tibble::tibble(metric = character(), week = as.Date(character()), value = numeric(),
                             n_days = integer(), fit = numeric()),
     trend = tibble::tibble(metric = character(), slope_unit = character(), slope = numeric(), lo = numeric(),
-                           hi = numeric(), n_weeks = integer(), verdict = character()))
+                           hi = numeric(), n_weeks = integer(), verdict = character()),
+    window = list(first_week = as.Date(NA), last_week = as.Date(NA)))
   if (nrow(daily) == 0) return(empty)
   d <- clean_daily(daily, today = today)
   d$date <- as.Date(d$date)
@@ -284,5 +285,6 @@ adaptation_trends <- function(daily, weeks = 12, min_days = 4, min_weeks = 6, ma
     weekly[[m]] <- tibble::tibble(metric = m, week = wk$week, value = bk(wk$m), n_days = as.integer(wk$n), fit = fit)
   }
   if (length(trend) == 0) return(empty)
-  list(weekly = dplyr::bind_rows(weekly), trend = dplyr::bind_rows(trend))
+  list(weekly = dplyr::bind_rows(weekly), trend = dplyr::bind_rows(trend),
+       window = list(first_week = first_wk, last_week = last_wk))
 }

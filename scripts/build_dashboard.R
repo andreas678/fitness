@@ -113,6 +113,12 @@ acts <- acts_s |>
 weights <- if (!is.null(weight_raw)) weight_raw |>
   transmute(date = format(date), weight_kg = round(weight_kg, 1)) else tibble(date = character(), weight_kg = numeric())
 
+trends <- adaptation_trends(daily_raw |> mutate(date = as.Date(date)))   # Wochentrend der letzten 12 Wochen (festes Fenster)
+trends_payload <- list(
+  weekly = trends$weekly |> transmute(metric, week = format(week), value = round(value, 2), n_days, fit = round(fit, 2)),
+  trend  = trends$trend |> mutate(across(c(slope, lo, hi), ~ round(.x, 3))),
+  first_week = format(trends$window$first_week), last_week = format(trends$window$last_week))
+
 wtrend <- if (!is.null(weight_raw)) weight_trend(weight_raw) else NULL   # NULL bei zu wenigen Wiegungen
 weights_trend <- if (is.null(wtrend)) tibble(date = character(), fit = numeric(), lo = numeric(), hi = numeric()) else
   wtrend |> transmute(date = format(date), fit = round(fit, 2), lo = round(lo, 2), hi = round(hi, 2))
@@ -147,6 +153,7 @@ payload <- paste0(
   "const ACTS = ",  to_json(acts),  ";\n",
   "const WEIGHT = ", to_json(weights), ";\n",
   "const WEIGHT_TREND = ", to_json(weights_trend), ";\n",
+  "const TRENDS = ", to_json(trends_payload), ";\n",
   "const RECOVERY = ", to_json(mutate(recov, across(where(is.numeric), ~ round(.x, 4)))), ";\n",
   "const META = ", toJSON(meta, auto_unbox = TRUE, dataframe = "rows", na = "null"), ";\n")
 
@@ -184,6 +191,8 @@ if (peak$n_peak > 0) {
 if (peak$n_peak < peak$n_hr) message(sprintf("  Pulskurve für %d von %d Einheiten vorhanden (der Rest: garmin_fitness.R noch nicht gelaufen oder bei Garmin nicht verfügbar).", peak$n_peak, peak$n_hr))
 message(sprintf("Letzte 14 Tage: %d Tage mit Erholungs-Index <= %.1f, ACWR aktuell %.2f",
                 sum(last$rec_low), REC_INDEX_THRESHOLD, tail(na.omit(dl$acwr), 1)))
+for (i in seq_len(nrow(trends$trend))) with(trends$trend[i, ],
+  message(sprintf("  Trend %-10s %+.2f %s [%+.2f; %+.2f], %d Wochen: %s", metric, slope, slope_unit, lo, hi, n_weeks, verdict)))
 message(sprintf("Aufbau/Ermüdung heute: Fitness %.1f, Ermüdung %.1f, Form %.1f (Fitness je nach Behandlung unbekannter Tage %.1f bis %.1f)",
                 tail(dl$ctl, 1), tail(dl$atl, 1), tail(dl$tsb, 1), min(pmc_sens$ctl), max(pmc_sens$ctl)))
 message(sprintf("  Die vier Erholungs-Signale entsprechen %.1f unabhängigen (Korrelation Schlaf-Score/Body Battery %.2f).",

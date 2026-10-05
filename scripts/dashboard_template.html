@@ -43,6 +43,10 @@ header h1 { font-size: 20px; font-weight: 600; }
 .card h3 { font-size: 14px; font-weight: 600; }
 .card .sub { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .chartbox { position: relative; height: 260px; }
+.chartbox.short { height: 150px; }
+.trend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 8px; }
+.trend-t { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+td.fav { color: var(--good); }
 .tablecard { overflow-x: auto; }
 .scroll { max-height: 440px; overflow-y: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -106,6 +110,11 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
     <div class="card"><h3>Aufbau und Ermüdung</h3><div class="sub">Aus der Trainingslast (TRIMP). Oben: „Fitness“ (aufgebaute Last, langes Mittel) und „Ermüdung“ (kurzes Mittel). Unten: Form = Fitness minus Ermüdung vom Vortag</div><div class="chartbox"><canvas id="c-pmc"></canvas></div><div class="chartbox" style="height:130px;margin-top:6px"><canvas id="c-form"></canvas></div><div class="note" id="pmc-note"></div></div>
     <div class="card"><h3>Ruhepuls gegen persönliche Baseline</h3><div class="sub">Band: Ø der 28 Vortage ± 1,5 Standardabweichungen, rote Punkte: deutlich erhöht</div><div class="chartbox"><canvas id="c-rhrbase"></canvas></div></div>
     <div class="card"><h3>Erholungs-Index pro Tag</h3><div class="sub" id="flags-sub"></div><div class="chartbox"><canvas id="c-flags"></canvas></div></div>
+    <div class="card" id="trends-card"><h3>Anpassungs-Trends</h3><div class="sub" id="trends-sub"></div>
+      <div class="trend-grid"><div><div class="trend-t">Ruhepuls</div><div class="chartbox short"><canvas id="c-tr-resting_hr"></canvas></div></div>
+        <div><div class="trend-t">HRV nachts</div><div class="chartbox short"><canvas id="c-tr-hrv_night"></canvas></div></div>
+        <div><div class="trend-t">Puls im Schlaf</div><div class="chartbox short"><canvas id="c-tr-sleep_hr"></canvas></div></div></div>
+      <div class="mini-wrap" id="trends-table"></div><div class="note" id="trends-note"></div></div>
     <div class="card" id="recovery-card"></div>
     <div class="card" id="zones-card"></div>
   </section>
@@ -357,6 +366,12 @@ function makeCharts() {
     options: baseOpts({ plugins: { legend: { display: false },
         tooltip: { callbacks: { label: c => `Form: ${nf(c.parsed.y, 1)} (${c.parsed.y >= 0 ? "Fitness über Ermüdung" : "Ermüdung über Fitness"})`, footer: pmcFooter } } },
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "Form" } } } }) });
+  const trendChart = (id, unit) => mk(id, { type: "line", data: { labels: [], datasets: [
+      { label: "Wochenmittel", data: [], showLine: false, borderColor: "#0072B2", backgroundColor: "#0072B2", pointRadius: 4 },
+      { label: "Trend", data: [], borderColor: "#888", borderDash: [5, 4], borderWidth: 1.8, pointRadius: 0, spanGaps: true }] },
+    options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.y == null ? "" : `${c.dataset.label}: ${nf(c.parsed.y, 1)} ${unit}` } } },
+      scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: unit } } } }) });
+  trendChart("c-tr-resting_hr", "bpm"); trendChart("c-tr-hrv_night", "ms"); trendChart("c-tr-sleep_hr", "bpm");
   mk("c-flags", { type: "bar", data: { labels: [], datasets: [{ label: "Erholungs-Index", data: [], backgroundColor: [] }] },
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: {
         label: c => { const r = flagRows[c.dataIndex]; const s = [r.sig_rhr && "Ruhepuls erhöht", r.sig_sleep && "Schlaf-Score niedrig", r.sig_bb && "Body Battery niedrig", r.sig_hrv && "HRV niedrig"].filter(Boolean);
@@ -458,6 +473,30 @@ function updateLoadCharts(d, L) {
   document.getElementById("flags-sub").textContent =
     `Mittel aus Ruhepuls (erhöht), Schlaf-Score, Body-Battery-Höchstwert und HRV (jeweils gegen die eigene 28-Tage-Baseline, niedriger = schlechter). ` +
     `Die vier Signale überlappen und entsprechen etwa ${nf(META.rec_index.n_eff, 1)} unabhängigen; rot ab ${nf(META.rec_index.threshold, 1)}. Beschreibend, nicht an einem Ergebnis geprüft.`;
+}
+function renderTrends() {
+  const card = document.getElementById("trends-card"), T = TRENDS;
+  if (!T.first_week || !T.trend.length) { card.style.display = "none"; return; }
+  const weeks = []; for (let t = tOf(T.first_week); t <= tOf(T.last_week); t += 7 * DAY) weeks.push(t);
+  const L = weeks.map(w => "KW " + isoWeek(w));
+  const NAMES = { resting_hr: "Ruhepuls", hrv_night: "HRV nachts", sleep_hr: "Puls im Schlaf" };
+  const UNIT = { resting_hr: "bpm", hrv_night: "ms", sleep_hr: "bpm" }, FAV = { resting_hr: "fallend", hrv_night: "steigend", sleep_hr: "fallend" };
+  const rows = T.trend.map(r => {
+    const w = T.weekly.filter(x => x.metric === r.metric), last = w.length ? w[w.length - 1] : null;
+    const sg = v => (v > 0 ? "+" : "") + nf(v, r.slope_unit === "%/Woche" ? 1 : 2);
+    const slope = r.slope == null ? "–" : `${sg(r.slope)} ${r.slope_unit} <small>[${sg(r.lo)}; ${sg(r.hi)}]</small>`;
+    const ch = charts["c-tr-" + r.metric];
+    if (ch) setData("c-tr-" + r.metric, L, [weeks.map(t => { const x = w.find(q => tOf(q.week) === t); return x ? x.value : null; }),
+                                            weeks.map(t => { const x = w.find(q => tOf(q.week) === t); return x && x.fit != null ? x.fit : null; })]);
+    return `<tr><td>${NAMES[r.metric]}</td><td class="num">${last ? nf(last.value, 1) + " " + UNIT[r.metric] : "–"}</td><td class="num">${slope}</td>` +
+      `<td${r.verdict === FAV[r.metric] ? ' class="fav"' : ""}>${r.verdict}</td><td class="num">${r.n_weeks} von ${weeks.length}</td></tr>`;
+  }).join("");
+  document.getElementById("trends-sub").textContent =
+    `Wochenmittel der letzten ${weeks.length} vollständigen Wochen (KW ${isoWeek(weeks[0])} bis ${isoWeek(weeks[weeks.length - 1])}) mit linearer Trendgeraden. Unabhängig vom gewählten Zeitraum.`;
+  document.getElementById("trends-table").innerHTML = `<table class="mini"><thead><tr><th>Kennwert</th><th>Letzte volle Woche</th><th>Trend je Woche [95 %-KI]</th><th>Urteil</th><th>Wochen</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById("trends-note").textContent =
+    `Eine Woche zählt ab 4 gültigen Tagen; Wochen im annotierten Zeitraum (z. B. Segeltörn) und unvollständige Wochen fehlen, der Trend läuft über diese Lücke. Grün: fallender Ruhepuls oder Puls im Schlaf, steigende HRV. ` +
+    `Das ist ein Zusammenhang, keine Ursache: Die Werte ändern sich auch durch Schlaf, Stress, Wärme und Krankheit. Das Intervall ist bei so wenigen Wochen nur eine Näherung.`;
 }
 function renderRecovery() {
   const fmtP = p => p == null ? "–" : p < 0.001 ? "&lt; 0,001" : nf(p, 3);
@@ -582,7 +621,7 @@ function renderTable() {
 // ---- Steuerung -----------------------------------------------------------------
 function refresh() {
   const daily = prepDaily();
-  renderKPIs(daily); updateCharts(daily); renderTable(); renderRecovery(); renderZones();
+  renderKPIs(daily); updateCharts(daily); renderTable(); renderRecovery(); renderTrends(); renderZones();
 }
 function init() {
   const groups = [...new Set(ACTS.map(a => a.group))].sort();
