@@ -6,7 +6,7 @@ Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholu
 
 ## Was herauskommt
 
-- **`_outputs/fitness_dashboard.html`**: interaktives Dashboard (Kennzahlen, Trainingsbelastung, ACWR, Erholungs-Index, HRV, Schlaf, Gewichtstrend, Herzfrequenzzonen, Aktivitätstabelle).
+- **`_outputs/fitness_dashboard.html`**: interaktives Dashboard (Kennzahlen, Trainingsbelastung, ACWR, Aufbau und Ermüdung, Erholungs-Index, Anpassungs-Trends, HRV, Schlaf, Gewichtstrend, Herzfrequenzzonen, Aktivitätstabelle).
 - **`_outputs/*.png`**: Einzelgrafiken und `fitness_dashboard.png` (Schritte, Ruhepuls, Schlaf, Wochenumfang, Rad-Kilometer, Puls je Aktivität, Body Battery).
 - Konsolenausgabe mit Kurzauswertung, Plausibilitätsprüfung und Sensitivitätstabelle.
 
@@ -84,6 +84,8 @@ from,to,note,load_unknown,short_sleep_real
 - **Belastung (TRIMP):** Banister-Formel aus Dauer und Herzfrequenzreserve. Mit Zeit in Zonen je Zone gerechnet (bildet Intervalle richtig ab), sonst aus dem Durchschnittspuls. Radfahrten ohne Pulsdaten (Pendeln) werden mit einer Intensität angesetzt, die aus den gemessenen Fahrten abgeleitet ist, und sind als „geschätzt“ markiert. Der Anteil geschätzter Last steht im Dashboard.
 - **ACWR:** Verhältnis der mittleren Tageslast der letzten 7 zu den letzten 28 Tagen, zusätzlich eine Variante nur mit gemessener Last. Der Bereich 0,8–1,3 ist ein grober Richtwert, kein Schwellenwert für Verletzungsrisiko. Unvollständige Tage zählen nicht mit.
 - **Erholungs-Index:** Ruhepuls, Schlaf-Score, Body-Battery-Höchstwert und HRV (auf der ln-Skala) jeweils gegen die eigene 28-Tage-Baseline (z-Wert, niedriger = schlechter). Die vier Signale überlappen (Schlaf-Score und Body Battery r ≈ 0,77), sie entsprechen bei diesen Daten etwa 1,8 unabhängigen Signalen. Der Index ist daher das Mittel der z-Werte geteilt durch seine eigene Standardabweichung; ab −1,5 gilt ein Tag als auffällig (rund 6 % der Tage). Mindestens 3 der 4 Signale müssen vorliegen. Die Einzelsignale bleiben in der Grafik als Hinweistext sichtbar.
+- **Aufbau und Ermüdung:** Banister-Modell auf der Trainingslast (TRIMP): „Fitness“ ist das exponentiell gewichtete Mittel der Tageslast mit 42 Tagen Zeitkonstante, „Ermüdung“ dasselbe mit 7 Tagen, Form ist Fitness minus Ermüdung vom Vortag. Das misst aufgebaute Trainingslast, keine gemessene Leistung, und die Werte sind nicht mit TSS-Werten anderer Programme vergleichbar (deshalb keine Bereichsgrenzen). Tage mit unbekannter Last (Segeltörn, Uhr nicht getragen, heutiger Tag) frieren den Zustand ein und sind in der Grafik gestrichelt; der Hinweis im Dashboard nennt die Spannweite der Fitness, je nachdem, ob unbekannte Tage eingefroren, mit dem Median aufgefüllt oder als 0 gewertet werden. Start beim Mittel der ersten 14 Tage, die ersten 42 Tage gelten als Einschwingphase.
+- **Anpassungs-Trends:** Wochenmittel von Ruhepuls, HRV (ln) und Puls im Schlaf über die letzten 12 vollständigen Wochen mit linearer Trendgeraden und 95-%-Konfidenzintervall. Eine Woche zählt ab 4 gültigen Tagen; annotierte Wochen (ab 50 % der Tage) und unvollständige Wochen fehlen, unter 6 Wochen gibt es keinen Trend. Ein Zusammenhang, keine Ursache: Die Werte ändern sich auch durch Schlaf, Stress, Wärme und Krankheit.
 - **Erholung nach HIIT:** Regressionsmodell mit dem Wochentag der Messung, Konfidenzintervall mit Newey-West-Standardfehlern, p-Werte nach Holm. Das Dashboard zeigt, auf wie vielen Wochentagen HIIT- und Vergleichstage vorkommen. Ein Zusammenhang, kein Kausalbeweis. Die Training Readiness wird nicht bewertet, weil sie Garmins eigene Last enthält.
 - **HFmax-Prüfung:** Vergleich mit dem höchsten 30-Sekunden-Mittel je Einheit. Werte weit über der Tanaka-Schätzung (+ 30 bpm) gelten als Sensorartefakt. HFmax wird nie automatisch angepasst.
 - **Gewichtstrend:** lokaler Trend mit 95-%-Band ab 8 Wiegungen. Die Änderung im gewählten Zeitraum (mit Konfidenzintervall) gibt es ab 6 Wiegungen, sonst steht dort „zu wenige für einen Trend“.
@@ -97,7 +99,7 @@ Rscript tests/testthat.R                                                  # R-Te
 node tests/js/test_weight_change.mjs                                      # JavaScript-Test (Gewichtstrend)
 ```
 
-`tests/audit/` enthält Skripte aus der Methodenprüfung (Sensitivitäts- und Plausibilitätsrechnungen auf den echten Daten, brauchen `data/`).
+`tests/audit/` enthält Skripte aus der Methodenprüfung und der Trainingsentwicklung (Sensitivitäts- und Plausibilitätsrechnungen auf den echten Daten über den Produktionsweg, brauchen `data/`).
 
 ## Projektstruktur
 
@@ -106,16 +108,16 @@ scripts/
   garmin_fitness.R         Abruf, Cache, Grafiken, Kurzauswertung
   build_dashboard.R        HTML-Dashboard bauen
   dashboard_template.html  Vorlage (Chart.js, Auswertung im Browser)
-  helpers.R                gemeinsame Funktionen (Bereinigung, Annotationen, Referenzen, Prüfungen)
-  load_recovery.R          Profil, TRIMP, ACWR, Baselines, Erholungsmodell
+  helpers.R                gemeinsame Funktionen (Bereinigung, Annotationen, Referenzen, Prüfungen, Gewichts- und Anpassungstrends)
+  load_recovery.R          Profil, TRIMP, ACWR, Fitness/Ermüdung, Baselines, Erholungs-Index, Erholungsmodell
   garmin_extra.py          Garmin-Abrufe (Schlaf, HRV, Pulskurve, Zonen, Gewicht) mit Wiederholung bei Fehlern
 tests/                     R-, Python- und JavaScript-Tests, Audit-Skripte
-plans/                     Plan und Ergebnisbericht der Methodenprüfung
+plans/                     Pläne und Ergebnisberichte (Methodenprüfung, Trainingsentwicklung)
 data/                      lokale Daten (git-ignoriert)
 _outputs/                  erzeugte Grafiken und Dashboard (git-ignoriert)
 ```
 
-Der Ergebnisbericht der Methodenprüfung mit offenen Punkten steht in [`plans/01-audit-fixes-ergebnis.md`](plans/01-audit-fixes-ergebnis.md).
+Die Ergebnisberichte mit offenen Punkten stehen in [`plans/01-audit-fixes-ergebnis.md`](plans/01-audit-fixes-ergebnis.md) und [`plans/02-trainingsentwicklung-ergebnis.md`](plans/02-trainingsentwicklung-ergebnis.md).
 
 ## Datenschutz
 
@@ -125,4 +127,5 @@ Der Ergebnisbericht der Methodenprüfung mit offenen Punkten steht in [`plans/01
 
 - Einzelperson, ein Handgelenk-Sensor: Aussagen gelten für diese Datenbasis und lassen sich nicht verallgemeinern. Optische Pulsmessung am Handgelenk kann bei Intervalltraining Artefakte liefern.
 - Der Erholungs-Index ist beschreibend und nicht gegen ein Ergebnis (Krankheit, Leistungsabfall) validiert; Schwelle, Standardabweichung und Korrelation stammen aus dem eigenen Gesamtzeitraum.
-- Die Last von Zeiträumen ohne Aufzeichnung bleibt unbekannt und wird nicht geschätzt.
+- Die Last von Zeiträumen ohne Aufzeichnung bleibt unbekannt und wird nicht geschätzt; die Fitness-Kurve ist dort eingefroren.
+- Es gibt keinen einzelnen Erfolgs-KPI: VO₂max liefert zu wenige Werte, Leistungsdaten fehlen. Ein echter Fortschrittsindikator bräuchte einen wiederholten Feldtest.
