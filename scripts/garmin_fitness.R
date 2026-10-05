@@ -54,15 +54,6 @@ DAYS_BACK <- 180      # So weit zurück wird geladen und gecacht
 TOKEN_DIR <- path.expand("~/.garminconnect")
 PY_ENV    <- "r-garmin"   # Name des Python-virtualenv für reticulate
 
-DIR_DATA <- here("data")
-dir.create(DIR_DATA, showWarnings = FALSE, recursive = TRUE)
-
-F_DAILY <- file.path(DIR_DATA, "garmin_daily.csv")
-F_ACT   <- file.path(DIR_DATA, "garmin_activities.csv")
-F_WEIGHT <- file.path(DIR_DATA, "garmin_weight.csv")
-F_ZONES  <- file.path(DIR_DATA, "garmin_activity_zones.csv")
-F_HR     <- file.path(DIR_DATA, "garmin_activity_hr.csv")
-
 # ---- 2. Hilfsfunktionen ------------------------------------------------------
 
 # Sicherer Zugriff auf verschachtelte Listen (Python-Dicts); NA wenn nicht vorhanden
@@ -75,8 +66,9 @@ pick <- function(x, ...) {
 }
 num <- function(x) suppressWarnings(as.numeric(x))
 
-source(here("scripts", "helpers.R"))   # days_to_fetch(), validate_*(), report_validation()
+source(here("scripts", "helpers.R"))   # Pfade F_* und read_*_cache(), days_to_fetch(), validate_*(), report_validation()
 source(here("scripts", "weather.R"))   # Tagestemperaturen (Open-Meteo)
+dir.create(DIR_DATA, showWarnings = FALSE, recursive = TRUE)
 
 # ---- 3. Garmin-Connect-Zugriff -----------------------------------------------
 
@@ -195,23 +187,6 @@ parse_activity <- function(a) {
   )
 }
 
-read_daily_cache <- function() {
-  if (!file.exists(F_DAILY)) return(NULL)
-  # Textspalten fest typisieren: read_csv würde "2026-10-01 22:44" sonst als Datum/Zeit lesen
-  read_csv(F_DAILY, show_col_types = FALSE,
-           col_types = cols(.default = col_guess(), sleep_start = col_character(),
-                            sleep_end = col_character(), hrv_status = col_character(),
-                            ready_level = col_character(), ts_status = col_character())) |>
-    mutate(date = as.Date(date))
-}
-read_act_cache <- function() {
-  if (!file.exists(F_ACT)) return(NULL)
-  read_csv(F_ACT, show_col_types = FALSE,
-           col_types = cols(activity_id = col_character(),
-                            start = col_datetime(), name = col_character(),
-                            type_key = col_character(), .default = col_double()))
-}
-
 # Tageswerte inkrementell nachladen (heute und gestern immer neu, da unvollständig)
 update_daily <- function(api) {
   old  <- if (REFRESH) NULL else read_daily_cache()
@@ -254,7 +229,7 @@ update_activities <- function(api) {
 
 # Wiegungen: Zeitraum komplett holen, per Datum mit Cache zusammenführen
 update_weight <- function(api) {
-  old <- if (!REFRESH && file.exists(F_WEIGHT)) read_csv(F_WEIGHT, show_col_types = FALSE) else NULL
+  old <- if (REFRESH) NULL else read_weight_cache()
   raw <- fetch_weights(api, as.character(Sys.Date() - DAYS_BACK), as.character(Sys.Date()))
   new <- if (length(raw) > 0)
     bind_rows(lapply(raw, function(w) {
@@ -271,8 +246,7 @@ update_weight <- function(api) {
 
 # Zeit in Herzfrequenzzonen: je Aktivität mit Pulsdaten einmal holen und cachen
 update_zones <- function(api, acts) {
-  old <- if (!REFRESH && file.exists(F_ZONES))
-    read_csv(F_ZONES, show_col_types = FALSE, col_types = cols(activity_id = col_character(), .default = col_double())) else NULL
+  old <- if (REFRESH) NULL else read_zones_cache()
   ids <- acts$activity_id[!is.na(acts$avg_hr)]
   todo <- setdiff(ids, if (is.null(old)) character() else old$activity_id)
   message(sprintf("Herzfrequenzzonen: %d Aktivitäten nachladen …", length(todo)))
@@ -291,8 +265,7 @@ update_zones <- function(api, acts) {
 
 # Spitzenpuls je Aktivität mit Pulsdaten aus der Pulskurve: einmal holen und cachen (ein Aufruf je Einheit)
 update_hr <- function(api, acts) {
-  old <- if (!REFRESH && file.exists(F_HR))
-    read_csv(F_HR, show_col_types = FALSE, col_types = cols(activity_id = col_character(), .default = col_double())) else NULL
+  old <- if (REFRESH) NULL else read_hr_cache()
   ids <- acts$activity_id[!is.na(acts$avg_hr)]
   todo <- setdiff(ids, if (is.null(old)) character() else old$activity_id)
   message(sprintf("Spitzenpuls: %d Aktivitäten nachladen …", length(todo)))

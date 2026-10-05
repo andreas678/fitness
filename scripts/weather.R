@@ -12,6 +12,12 @@ WEATHER_VARS <- c("temperature_2m_max", "temperature_2m_min", "temperature_2m_me
 
 weather_empty <- function() tibble::tibble(date = as.Date(character()), tmax = numeric(), tmin = numeric(), tmean = numeric())
 
+# data/weather.csv lesen (Pfad F_WEATHER aus helpers.R); ohne Datei eine leere Tabelle
+read_weather_cache <- function(path = F_WEATHER) {
+  if (!file.exists(path)) return(weather_empty())
+  readr::read_csv(path, show_col_types = FALSE, col_types = readr::cols(date = readr::col_date(), .default = readr::col_double()))
+}
+
 weather_url <- function(lat, lon, start, end) {
   sprintf("https://archive-api.open-meteo.com/v1/archive?latitude=%s&longitude=%s&start_date=%s&end_date=%s&daily=%s&timezone=Europe%%2FBerlin",
           format(lat), format(lon), format(start), format(end), paste(WEATHER_VARS, collapse = ","))
@@ -28,14 +34,14 @@ parse_weather <- function(j) {
 
 # Lädt fehlende Tage nach und speichert sie in `path` (Spalten date, tmax, tmin, tmean). Bei Netzfehlern kein
 # Abbruch: Warnung und die vorhandenen Daten bleiben.
-update_weather <- function(path = here::here("data", "weather.csv"), lat = WEATHER_DEFAULT$lat, lon = WEATHER_DEFAULT$lon,
+update_weather <- function(path = F_WEATHER, lat = WEATHER_DEFAULT$lat, lon = WEATHER_DEFAULT$lon,
                            start, end = Sys.Date(), refetch_days = 7,
                            fetch = function(url) { o <- options(timeout = 30); on.exit(options(o)); jsonlite::fromJSON(url) }) {
   if (!(is.numeric(lat) && length(lat) == 1 && lat >= -90 && lat <= 90)) stop("update_weather: lat muss zwischen -90 und 90 liegen")
   if (!(is.numeric(lon) && length(lon) == 1 && lon >= -180 && lon <= 180)) stop("update_weather: lon muss zwischen -180 und 180 liegen")
   start <- as.Date(start); end <- as.Date(end)
   if (is.na(start) || is.na(end) || start > end) stop("update_weather: start muss vor oder gleich end liegen")
-  old <- if (file.exists(path)) readr::read_csv(path, show_col_types = FALSE, col_types = readr::cols(date = readr::col_date(), .default = readr::col_double())) else weather_empty()
+  old <- read_weather_cache(path)
   from <- if (nrow(old) > 0 && min(old$date) <= start) max(start, max(old$date) - refetch_days) else start
   if (from > end) return(old)
   new <- tryCatch(parse_weather(fetch(weather_url(lat, lon, from, end))),

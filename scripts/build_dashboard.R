@@ -24,34 +24,27 @@ source(here("scripts", "weather.R"))
 RECALC <- "--recalc-profile" %in% commandArgs(trailingOnly = TRUE)   # feste Referenzwerte neu bestimmen
 
 ann       <- read_annotations()      # data/annotations.csv: bekannte Zeiträume (Segeln, Nachtwachen ...)
-daily_raw <- read_csv(here("data", "garmin_daily.csv"), show_col_types = FALSE) |>
-  apply_annotations(ann)
-wx_raw <- if (file.exists(here("data", "weather.csv")))                      # Tagestemperaturen (scripts/update_weather.R)
-  read_csv(here("data", "weather.csv"), show_col_types = FALSE, col_types = cols(date = col_date(), .default = col_double())) else weather_empty()
+daily_raw <- read_daily_cache()      # alle CSV-Leser stehen in helpers.R (Pfade und Spaltentypen an einer Stelle)
+if (is.null(daily_raw)) stop("data/garmin_daily.csv fehlt: erst Rscript scripts/garmin_fitness.R ausführen.")
+daily_raw <- apply_annotations(daily_raw, ann)
+wx_raw <- read_weather_cache()       # Tagestemperaturen (scripts/update_weather.R); ohne Datei leer
 if (nrow(wx_raw) > 0) daily_raw <- daily_raw |> mutate(date = as.Date(date)) |> left_join(wx_raw, by = "date")
 if (nrow(ann) > 0) message(sprintf("Annotationen: %d Zeitraum/Zeiträume, %d Tage beschriftet.", nrow(ann), sum(!is.na(daily_raw$ann_note))))
 
-acts_m <- read_csv(here("data", "garmin_activities.csv"), show_col_types = FALSE,
-                   col_types = cols(activity_id = col_character(), start = col_datetime(),
-                                    name = col_character(), type_key = col_character(),
-                                    .default = col_double())) |>
+acts_raw <- read_act_cache()         # Garmin-Segmente, wie gespeichert (ungemergt)
+if (is.null(acts_raw)) stop("data/garmin_activities.csv fehlt: erst Rscript scripts/garmin_fitness.R ausführen.")
+acts_m <- acts_raw |>
   merge_rides(RIDE_GAP_MIN, RIDE_MIN_MIN) |>
   mutate(group = activity_group(type_key))
 
-# optionale Zusatzdaten (garmin_fitness.R legt sie an)
-read_opt <- function(f, ...) if (file.exists(f)) read_csv(f, show_col_types = FALSE, ...) else NULL
-zones_raw  <- read_opt(here("data", "garmin_activity_zones.csv"),
-                       col_types = cols(activity_id = col_character(), .default = col_double()))
-weight_raw <- read_opt(here("data", "garmin_weight.csv"))
-hr_raw     <- read_opt(here("data", "garmin_activity_hr.csv"),   # Spitzenpuls aus der Pulskurve (30-s-Mittel)
-                       col_types = cols(activity_id = col_character(), .default = col_double()))
+# optionale Zusatzdaten (garmin_fitness.R legt sie an); NULL, wenn die Datei fehlt
+zones_raw  <- read_zones_cache()
+weight_raw <- read_weight_cache()
+hr_raw     <- read_hr_cache()        # Spitzenpuls aus der Pulskurve (30-s-Mittel)
 
 # Profil, Belastung, Erholungs-Signale (siehe load_recovery.R)
 report_validation(validate_daily(daily_raw), "Tageswerte")
-report_validation(validate_acts(read_csv(here("data", "garmin_activities.csv"), show_col_types = FALSE,
-                                         col_types = cols(activity_id = col_character(), start = col_datetime(),
-                                                          name = col_character(), type_key = col_character(),
-                                                          .default = col_double()))), "Aktivitäten")
+report_validation(validate_acts(acts_raw), "Aktivitäten")      # auf den ungemergten Segmenten, wie gespeichert
 
 # Feste Referenzwerte (data/profile.json), damit sich die Belastung alter Einheiten nicht mit dem Datenfenster
 # verschiebt: Ruhepuls-Referenz und Pendel-Puls (bpm) werden einmal bestimmt; neu mit --recalc-profile
