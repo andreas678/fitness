@@ -107,7 +107,7 @@ roll_apply <- function(x, k, fun, min_n, lag_by = 0) {
 }
 
 daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
-  daily <- arrange(daily, date)
+  daily <- flag_daily(arrange(daily, date))
   per_day <- acts_s |>
     mutate(date = as.Date(start)) |>
     group_by(date) |>
@@ -128,21 +128,23 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
     load_est  = ifelse(unrecorded, NA_real_, coalesce(load_est, 0)),
     load      = load_meas + load_est,
     hiit      = coalesce(hiit, FALSE),
-    acute_d   = roll_apply(load, 7, mean, 5),      # mittlere Tageslast, letzte 7 Tage
-    chronic_d = roll_apply(load, 28, mean, 14),    # mittlere Tageslast, letzte 28 Tage
+    # unvollständige Tage (heute, Uhr nicht getragen) zählen nicht in die Mittel; ihre Last bleibt sichtbar
+    load_acwr = ifelse(partial, NA_real_, load),
+    acute_d   = roll_apply(load_acwr, 7, mean, 5),      # mittlere Tageslast, letzte 7 Tage
+    chronic_d = roll_apply(load_acwr, 28, mean, 14),    # mittlere Tageslast, letzte 28 Tage
     acwr      = ifelse(!is.na(chronic_d) & chronic_d >= 1, acute_d / chronic_d, NA_real_)
   )
 
-  # persönliche Baselines (28 Tage vor dem jeweiligen Tag, mind. 14 Werte)
-  rhr   <- ifelse(d$resting_hr >= 45, d$resting_hr, NA)       # < 45 = Artefakt
-  bad   <- !is.na(d$sleep_h) & d$sleep_h < 5                  # Uhr nicht getragen
-  sleep <- ifelse(bad, NA, d$sleep_score)
-  bb    <- ifelse(bad, NA, d$bb_high)
+  # persönliche Baselines (28 Tage vor dem jeweiligen Tag, mind. 14 Werte), aus bereinigten Werten
+  cl    <- clean_daily(d, extra_cols = "bb_high")   # Artefakt-Ruhepuls und ungültige Nächte = NA
+  rhr   <- cl$resting_hr
+  sleep <- cl$sleep_score
+  bb    <- cl$bb_high
   z <- function(x, k = 28, min_n = 14) {
     m <- roll_apply(x, k, mean, min_n, lag_by = 1); s <- roll_apply(x, k, sd, min_n, lag_by = 1)
     list(m = m, s = s, z = ifelse(!is.na(s) & s > 0, (x - m) / s, NA_real_))
   }
-  hrv   <- if ("hrv_night" %in% names(d)) ifelse(bad, NA, d$hrv_night) else rep(NA_real_, nrow(d))
+  hrv   <- if ("hrv_night" %in% names(cl)) cl$hrv_night else rep(NA_real_, nrow(d))
   zr <- z(rhr); zs <- z(sleep); zb <- z(bb); zh <- z(hrv)
   d$rhr_base <- zr$m; d$rhr_lo <- zr$m - 1.5 * zr$s; d$rhr_hi <- zr$m + 1.5 * zr$s
   d$rhr_z <- zr$z; d$sleep_z <- zs$z; d$bb_z <- zb$z; d$hrv_z <- zh$z
@@ -163,12 +165,14 @@ perm_p <- function(x, y, B = 10000) {
 }
 
 recovery_summary <- function(d) {
-  d <- d |> mutate(sleep_ok = !is.na(sleep_h) & sleep_h >= 5)
-  has <- function(col) col %in% names(d)
-  ok  <- function(col) if (has(col)) ifelse(d$sleep_ok, d[[col]], NA) else rep(NA_real_, nrow(d))
+  d  <- flag_daily(d)
+  cl <- clean_daily(d, extra_cols = c("bb_high", "ready_score"))
+  sleep_ok <- !is.na(d$sleep_h) & !d$sleep_bad       # Nacht vorhanden und gültig
+  has <- function(col) col %in% names(cl)
+  ok  <- function(col) if (has(col)) ifelse(sleep_ok, cl[[col]], NA) else rep(NA_real_, nrow(d))
   nx <- tibble(date = d$date - 1,
                sleep_score_n = ok("sleep_score"), deep_h_n = ok("deep_h"), bb_high_n = ok("bb_high"),
-               resting_hr_n = ifelse(d$resting_hr >= 45, d$resting_hr, NA),
+               resting_hr_n = cl$resting_hr,
                hrv_n = ok("hrv_night"), sleep_hr_n = ok("sleep_hr"), ready_n = ok("ready_score"))
   x <- d |> filter(!unrecorded) |> select(date, hiit, te_max) |> inner_join(nx, by = "date")
   mets <- c(sleep_score_n = "Schlaf-Score", deep_h_n = "Tiefschlaf (h)",

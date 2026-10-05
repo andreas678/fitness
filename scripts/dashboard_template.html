@@ -82,19 +82,19 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
       <label>Aktivitätstyp
         <select id="f-group"><option value="all">Alle</option></select>
       </label>
-      <label><input type="checkbox" id="f-bad" checked> Nächte &lt; 5 h ausblenden</label>
+      <label><input type="checkbox" id="f-bad" checked> <span id="f-bad-label">Nächte ausblenden</span></label>
     </div>
   </header>
 
   <section class="kpis" id="kpis"></section>
 
   <section class="charts">
-    <div class="card"><h3>Schritte pro Tag</h3><div class="sub">Linie: 7-Tage-Mittel, gestrichelt: Ziel</div><div class="chartbox"><canvas id="c-steps"></canvas></div></div>
+    <div class="card"><h3>Schritte pro Tag</h3><div class="sub">Linie: 7-Tage-Mittel, gestrichelt: Ziel. Blasse Balken: unvollständiger Tag, zählt nicht ins Mittel</div><div class="chartbox"><canvas id="c-steps"></canvas></div></div>
     <div class="card"><h3>Ruhepuls</h3><div class="sub">Punkte: Tageswerte, Linie: 7-Tage-Mittel</div><div class="chartbox"><canvas id="c-rhr"></canvas></div></div>
     <div class="card"><h3>Schlaf</h3><div class="sub">Stunden pro Nacht nach Phase</div><div class="chartbox"><canvas id="c-sleep"></canvas></div></div>
     <div class="card"><h3>Body Battery</h3><div class="sub">Tageshöchst- und -tiefstwert</div><div class="chartbox"><canvas id="c-bb"></canvas></div></div>
-    <div class="card"><h3>Trainingsumfang pro Woche</h3><div class="sub">Stunden nach Aktivitätstyp (Wochen ohne Aufzeichnung bleiben leer)</div><div class="chartbox"><canvas id="c-week"></canvas></div></div>
-    <div class="card"><h3>Rad: Kilometer pro Woche</h3><div class="sub">Zusammengefasste Fahrten</div><div class="chartbox"><canvas id="c-ride"></canvas></div></div>
+    <div class="card"><h3>Trainingsumfang pro Woche</h3><div class="sub">Stunden nach Aktivitätstyp (Wochen ohne Aufzeichnung bleiben leer). * blass: unvollständige Woche</div><div class="chartbox"><canvas id="c-week"></canvas></div></div>
+    <div class="card"><h3>Rad: Kilometer pro Woche</h3><div class="sub">Zusammengefasste Fahrten. * blass: unvollständige Woche</div><div class="chartbox"><canvas id="c-ride"></canvas></div></div>
   </section>
 
   <h2 class="sect">Belastung &amp; Erholung</h2>
@@ -131,7 +131,8 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
 const GROUP_COLORS = { "Rad": "#0072B2", "Laufen": "#D55E00", "Gym / HIIT": "#CC79A7",
   "Gehen / Wandern": "#009E73", "Segeln / Wasser": "#56B4E9", "Sonstiges": "#999999" };
 const PHASE_COLORS = { Tief: "#1F4E79", Leicht: "#6BAED6", REM: "#9E7BB5", Wach: "#E69F00" };
-const STEP_GOAL = 10000, MIN_SLEEP_H = 5, DAY = 86400000;
+const STEP_GOAL = 10000, DAY = 86400000;
+const MIN_SLEEP_H = META.min_sleep_h, SLEEP_COLS = META.sleep_cols;   // Schwellen und Spalten kommen aus helpers.R
 
 const nf = (v, d = 0) => (v == null || Number.isNaN(v)) ? "–"
   : v.toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -154,16 +155,16 @@ const charts = {};
 function prepDaily() {
   const rows = DAILY.map(r => {
     const x = { ...r, t: tOf(r.date) };
-    if (state.hideBad && x.sleep_h != null && x.sleep_h < MIN_SLEEP_H)
-      ["sleep_h", "deep_h", "light_h", "rem_h", "awake_h", "sleep_score", "hrv_night", "sleep_hr", "spo2_avg", "spo2_low",
-       "resp_sleep", "skin_temp_dev", "bed_h", "wake_h"].forEach(k => x[k] = null);
+    if (x.rhr_bad) x.resting_hr = null;                      // Ruhepuls unter Schwelle = Messartefakt, immer ausgeblendet
+    if (state.hideBad && x.sleep_bad) SLEEP_COLS.forEach(k => x[k] = null);
+    x.steps_ok = x.partial ? null : x.steps;                 // unvollständige Tage zählen nicht in Mittel und KPIs
     return x;
   }).sort((a, b) => a.t - b.t);
   const roll = k => rows.map((_, i) => {           // wie roll_mean() in R: mind. 3 Werte der letzten 7 Tage
     const w = rows.slice(Math.max(0, i - 6), i + 1).map(r => r[k]).filter(v => v != null);
     return w.length >= 3 ? mean(w) : null;
   });
-  const s7 = roll("steps"), r7 = roll("resting_hr"), h7 = roll("hrv_night");
+  const s7 = roll("steps_ok"), r7 = roll("resting_hr"), h7 = roll("hrv_night");
   rows.forEach((r, i) => { r.steps_7d = s7[i]; r.rhr_7d = r7[i]; r.hrv_7d = h7[i]; });
   return rows;
 }
@@ -182,7 +183,7 @@ function kpiValues(daily, from, to) {
   const d = daily.filter(r => inRange(r.t, from, to));
   const a = ACTS.filter(x => inRange(actT(x), from, to));
   return {
-    steps: mean(d.map(r => r.steps)),
+    steps: mean(d.map(r => r.steps_ok)),
     rhr: mean(d.map(r => r.resting_hr)),
     sleep: mean(d.map(r => r.sleep_h)),
     hiit: a.filter(x => x.group === "Gym / HIIT").length,
@@ -202,7 +203,7 @@ function renderKPIs(daily) {
   const { from, to, prev } = range();
   const cur = kpiValues(daily, from, to), old = prev ? kpiValues(daily, prev[0], prev[1]) : null;
   // Uhr vermutlich nicht getragen: Nacht fehlt oder < 5 h (unabhängig vom Filter "ausblenden")
-  const gappy = (a, b) => DAILY.filter(r => inRange(tOf(r.date), a, b) && (r.unrecorded || r.sleep_h == null || r.sleep_h < MIN_SLEEP_H)).length / ((b - a) / DAY + 1) > 0.25;
+  const gappy = (a, b) => DAILY.filter(r => inRange(tOf(r.date), a, b) && (r.unrecorded || r.sleep_h == null || r.sleep_bad)).length / ((b - a) / DAY + 1) > 0.25;
   const prevGappy = prev && (gappy(prev[0], prev[1]) || gappy(from, to));
   const extra = extraKpis(daily, from, to);
   document.getElementById("kpis").innerHTML = KPI_DEFS.map(d => {
@@ -263,7 +264,8 @@ function makeCharts() {
       { type: "line", label: "7-Tage-Mittel", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25, order: 1 },
       { type: "line", label: "Ziel", data: [], borderColor: "#888", borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, order: 2 }] },
     options: baseOpts({ plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
-      tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y)}` } } } }) });
+      tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y)}`,
+        afterLabel: c => (c.datasetIndex === 0 && dayRows[c.dataIndex] && dayRows[c.dataIndex].partial) ? "unvollständiger Tag, nicht im Mittel" : "" } } } }) });
   mk("c-rhr", { data: { labels: [], datasets: [
       { type: "line", label: "Ruhepuls", data: [], showLine: false, borderColor: "#E69F00", backgroundColor: "#E69F0099", pointRadius: 3 },
       { type: "line", label: "7-Tage-Mittel", data: [], borderColor: "#D55E00", borderWidth: 2.5, pointRadius: 0, tension: .25 }] },
@@ -349,13 +351,13 @@ function setData(id, labels, sets) {
   sets.forEach((d, i) => c.data.datasets[i].data = d);
   c.update("none");
 }
-let flagRows = [], readyRows = [];
+let flagRows = [], readyRows = [], dayRows = [];
 const FLAG_COLORS = ["#00000000", "#E69F00", "#D55E00", "#B3261E", "#7A1712"];
 function updateLoadCharts(d, L) {
   const un = r => r.unrecorded ? null : undefined;
   setData("c-load", L, [d.map(r => r.load_meas), d.map(r => r.load_est), d.map(r => r.acute_d), d.map(r => r.chronic_d)]);
   setData("c-acwr", L, [d.map(() => 0.8), d.map(() => 1.3), d.map(r => r.acwr), d.map(r => r.ts_acwr)]);
-  const rh = r => (r.resting_hr != null && r.resting_hr >= 45) ? r.resting_hr : null;
+  const rh = r => r.resting_hr;                             // Artefakte sind in prepDaily schon entfernt
   setData("c-rhrbase", L, [d.map(r => r.rhr_lo), d.map(r => r.rhr_hi), d.map(r => r.rhr_base), d.map(rh)]);
   const c = charts["c-rhrbase"]; c.data.datasets[3].pointBackgroundColor = d.map(r => r.sig_rhr ? "#B3261E" : "#E69F00");
   c.data.datasets[3].pointRadius = d.map(r => r.sig_rhr ? 5 : 3); c.update("none");
@@ -405,6 +407,8 @@ function updateCharts(daily) {
   const { from, to } = range();
   const d = daily.filter(r => inRange(r.t, from, to));
   const L = d.map(r => label(r.t));
+  dayRows = d;
+  charts["c-steps"].data.datasets[0].backgroundColor = d.map(r => r.partial ? "#A6C8E066" : "#A6C8E0");
   setData("c-steps", L, [d.map(r => r.steps), d.map(r => r.steps_7d), d.map(() => STEP_GOAL)]);
   setData("c-rhr", L, [d.map(r => r.resting_hr), d.map(r => r.rhr_7d)]);
   setData("c-sleep", L, [d.map(r => r.deep_h), d.map(r => r.light_h), d.map(r => r.rem_h), d.map(r => r.awake_h)]);
@@ -417,12 +421,15 @@ function updateCharts(daily) {
   const acts = ACTS.filter(a => inRange(actT(a), from, to) && (state.group === "all" || a.group === state.group));
   const groups = Object.keys(GROUP_COLORS).filter(g => acts.some(a => a.group === g));
   const wc = charts["c-week"];
-  wc.data.labels = weeks.map(w => "KW " + isoWeek(w));
-  wc.data.datasets = groups.map(g => ({ label: g, backgroundColor: GROUP_COLORS[g],
+  const startT = Math.max(from, minT), partialWeek = w => w < startT || w + 6 * DAY > maxT;   // angeschnitten oder noch laufend
+  const wlabel = w => "KW " + isoWeek(w) + (partialWeek(w) ? "*" : "");
+  wc.data.labels = weeks.map(wlabel);
+  wc.data.datasets = groups.map(g => ({ label: g, backgroundColor: ctx => GROUP_COLORS[g] + (partialWeek(weeks[ctx.dataIndex]) ? "80" : ""),
     data: weeks.map(w => sum(acts.filter(a => a.group === g && monday(actT(a)) === w).map(a => a.duration_min)) / 60) }));
   wc.update("none");
   const rideActs = ACTS.filter(a => inRange(actT(a), from, to) && a.group === "Rad");
-  setData("c-ride", weeks.map(w => "KW " + isoWeek(w)),
+  charts["c-ride"].data.datasets[0].backgroundColor = weeks.map(w => GROUP_COLORS["Rad"] + (partialWeek(w) ? "80" : ""));
+  setData("c-ride", weeks.map(wlabel),
     [weeks.map(w => sum(rideActs.filter(a => monday(actT(a)) === w).map(a => a.distance_km)))]);
 }
 
@@ -480,6 +487,7 @@ function init() {
   groups.forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
   document.getElementById("f-days").onchange = e => { state.days = +e.target.value; refresh(); };
   sel.onchange = e => { state.group = e.target.value; refresh(); };
+  document.getElementById("f-bad-label").textContent = `Nächte < ${MIN_SLEEP_H} h ausblenden`;
   document.getElementById("f-bad").onchange = e => { state.hideBad = e.target.checked; refresh(); };
   document.getElementById("foot").textContent =
     `Daten bis ${new Date(maxT).toLocaleDateString("de-DE")} · erzeugt ${META.built} · Heute und gestern können unvollständig sein · ` +

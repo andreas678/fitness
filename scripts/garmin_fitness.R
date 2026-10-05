@@ -370,8 +370,11 @@ if (DEMO) {
 set_utf8_locale()   # nach dem Python-Start, vor dem Plot-Code
 
 since <- Sys.Date() - PLOT_DAYS
-daily <- daily |> filter(date >= since) |> arrange(date) |>
-  mutate(steps_7d = roll_mean(steps), rhr_7d = roll_mean(resting_hr),
+# clean_daily() (helpers.R): ungültige Nächte und Ruhepuls-Artefakte werden NA, unvollständige Tage
+# bekommen partial = TRUE und zählen nicht in Mittelwerten (wie im Dashboard)
+daily <- daily |> filter(date >= since) |> arrange(date) |> clean_daily() |>
+  mutate(steps_c = ifelse(partial, NA_real_, steps),
+         steps_7d = roll_mean(steps_c), rhr_7d = roll_mean(resting_hr),
          sleep_7d = roll_mean(sleep_h))
 acts <- merge_rides(acts, RIDE_GAP_MIN, RIDE_MIN_MIN) |>
   filter(as.Date(start) >= since) |>
@@ -394,11 +397,12 @@ plots <- list()
 # 6.1 Schritte
 if (has(daily, "steps")) {
   plots$schritte <- ggplot(daily, aes(date, steps)) +
-    geom_col(fill = "#A6C8E0") +
+    geom_col(aes(alpha = partial), fill = "#A6C8E0") +
+    scale_alpha_manual(values = c(`FALSE` = 1, `TRUE` = 0.35), guide = "none") +
     geom_line(aes(y = steps_7d), colour = "#0072B2", linewidth = 1, na.rm = TRUE) +
     geom_hline(yintercept = STEP_GOAL, linetype = "dashed", colour = "grey40") +
     x_date + scale_y_continuous(labels = de_num) +
-    labs(title = "Schritte pro Tag", subtitle = "Linie: 7-Tage-Mittel, gestrichelt: Ziel",
+    labs(title = "Schritte pro Tag", subtitle = "Linie: 7-Tage-Mittel, gestrichelt: Ziel, blass: unvollständiger Tag",
          x = NULL, y = NULL)
 }
 
@@ -432,23 +436,26 @@ weekly <- acts |>
   mutate(week = floor_date(as.Date(start), "week", week_start = 1)) |>
   group_by(week, group) |>
   summarise(hours = sum(duration_min) / 60, km = sum(distance_km, na.rm = TRUE),
-            .groups = "drop")
+            .groups = "drop") |>
+  mutate(partial = week < since | week + 6 > Sys.Date())   # angeschnittene oder laufende Woche
 if (nrow(weekly) > 0) {
-  plots$wochenumfang <- ggplot(weekly, aes(week, hours, fill = group)) +
+  plots$wochenumfang <- ggplot(weekly, aes(week, hours, fill = group, alpha = partial)) +
     geom_col(width = 6) +
+    scale_alpha_manual(values = c(`FALSE` = 1, `TRUE` = 0.45), guide = "none") +
     scale_fill_manual(values = GROUP_COLORS, name = NULL, drop = TRUE) +
     scale_x_date(date_labels = "KW %V", expand = expansion(mult = 0.02)) +
-    labs(title = "Trainingsumfang pro Woche", subtitle = "Stunden nach Aktivitätstyp",
+    labs(title = "Trainingsumfang pro Woche", subtitle = "Stunden nach Aktivitätstyp, blass: unvollständige Woche",
          x = NULL, y = "h")
 }
 
 # 6.5 Radpendeln: Wochenkilometer
 ride_week <- filter(weekly, group == "Rad", km > 0)
 if (nrow(ride_week) > 0) {
-  plots$rad <- ggplot(ride_week, aes(week, km)) +
+  plots$rad <- ggplot(ride_week, aes(week, km, alpha = partial)) +
     geom_col(width = 6, fill = GROUP_COLORS[["Rad"]]) +
+    scale_alpha_manual(values = c(`FALSE` = 1, `TRUE` = 0.45), guide = "none") +
     scale_x_date(date_labels = "KW %V", expand = expansion(mult = 0.02)) +
-    labs(title = "Rad: Kilometer pro Woche", x = NULL, y = "km")
+    labs(title = "Rad: Kilometer pro Woche", subtitle = "blass: unvollständige Woche", x = NULL, y = "km")
 }
 
 # 6.6 Durchschnittspuls je Aktivität
@@ -498,9 +505,10 @@ if (length(plots) >= 2 && requireNamespace("patchwork", quietly = TRUE)) {
 }
 
 # ---- 8. Kurz-Zusammenfassung (letzte 30 Tage) --------------------------------
-last30 <- filter(daily, date > Sys.Date() - 30)
+last30 <- filter(daily, date > Sys.Date() - 30, !partial)   # ohne unvollständige Tage
 a30    <- filter(acts, as.Date(start) > Sys.Date() - 30)
-cat("\n=== Letzte 30 Tage ===\n")
+cat(sprintf("\n=== Letzte 30 Tage (%d Tage, %d unvollständige nicht mitgerechnet) ===\n",
+            nrow(last30), sum(daily$partial & daily$date > Sys.Date() - 30)))
 cat(sprintf("Schritte (Ø/Tag):   %s\n", format(round(mean(last30$steps, na.rm = TRUE)), big.mark = ".", decimal.mark = ",")))
 cat(sprintf("Ruhepuls (Ø):       %.1f bpm\n", mean(last30$resting_hr, na.rm = TRUE)))
 cat(sprintf("Schlaf (Ø):         %.1f h\n", mean(last30$sleep_h, na.rm = TRUE)))

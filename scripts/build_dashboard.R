@@ -40,7 +40,7 @@ zones_raw  <- read_opt(here("data", "garmin_activity_zones.csv"),
 weight_raw <- read_opt(here("data", "garmin_weight.csv"))
 
 # Profil, Belastung, Erholungs-Signale (siehe load_recovery.R)
-rhr_ref <- median(daily_raw$resting_hr[daily_raw$resting_hr >= 45], na.rm = TRUE)
+rhr_ref <- median(clean_daily(daily_raw)$resting_hr, na.rm = TRUE)   # ohne Ruhepuls-Artefakte
 prof    <- athlete_profile(rhr_ref)
 acts_s  <- session_load(acts_m, prof, COMMUTE_HRR, zones_raw)
 dl      <- daily_load_recovery(daily_raw, acts_s)
@@ -58,13 +58,15 @@ daily <- dl |>
   mutate(date = format(date),
          stress_avg = ifelse(stress_avg < 0, NA, stress_avg),     # -1 = kein Wert
          bed_h = round(to_clock_h(sleep_start, TRUE), 2), wake_h = round(to_clock_h(sleep_end), 2),
-         across(any_of(c("sig_rhr", "sig_sleep", "sig_bb", "sig_hrv", "unrecorded", "hiit")), as.integer),
+         across(any_of(c("sig_rhr", "sig_sleep", "sig_bb", "sig_hrv", "unrecorded", "hiit",
+                         "sleep_bad", "rhr_bad", "partial")), as.integer),
          across(c(load_meas, load_est, acute_d, chronic_d, acwr, rhr_base, rhr_lo, rhr_hi),
                 ~ round(.x, 2))) |>
   select(date, steps, distance_km, resting_hr, kcal_active, intensity_min, stress_avg,
          bb_high, bb_low, sleep_h, deep_h, light_h, rem_h, awake_h, sleep_score,
          hiit, unrecorded, load_meas, load_est, acute_d, chronic_d, acwr,
          rhr_base, rhr_lo, rhr_hi, sig_rhr, sig_sleep, sig_bb, sig_hrv, flags,
+         sleep_bad, rhr_bad, partial,
          any_of(c("bed_h", "wake_h", "sleep_need_min", "sleep_hr", "sleep_stress", "awake_count",
                   "restless", "spo2_avg", "spo2_low", "resp_sleep", "skin_temp_dev", "bb_sleep_change",
                   "hrv_night", "hrv_weekly", "hrv_base_low", "hrv_base_high", "hrv_status",
@@ -86,6 +88,8 @@ hr_sessions <- acts_s |> filter(!is.na(max_hr))
 meta <- list(
   built = format(Sys.time(), "%d.%m.%Y %H:%M"),
   ride_gap_min = RIDE_GAP_MIN, ride_min_min = RIDE_MIN_MIN, commute_hrr = COMMUTE_HRR,
+  min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR,                 # Schwellen aus helpers.R, vom Dashboard mitgenutzt
+  sleep_cols = c(SLEEP_COLS, "bed_h", "wake_h"),                # bei ungültiger Nacht ausblendbar
   garmin_zones = if (!is.null(zones_raw) && nrow(zones_raw) > 0)
     list(lows = round(c(median(zones_raw$z1_low, na.rm = TRUE), median(zones_raw$z2_low, na.rm = TRUE),
                         median(zones_raw$z3_low, na.rm = TRUE), median(zones_raw$z4_low, na.rm = TRUE),
