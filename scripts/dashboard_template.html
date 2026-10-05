@@ -30,6 +30,23 @@ header h1 { font-size: 20px; font-weight: 600; }
 .filters select { padding: 6px 10px; border: 1px solid rgba(255,255,255,.25); border-radius: 4px;
                   background: rgba(255,255,255,.1); color: #fff; font-size: 13px; }
 .filters select option { background: #1a1a2e; color: #fff; }
+.filters input[type=date] { padding: 5px 8px; border: 1px solid rgba(255,255,255,.25); border-radius: 4px;
+                  background: rgba(255,255,255,.1); color: #fff; font-size: 13px; color-scheme: dark; }
+.filters .range { display: flex; align-items: center; gap: 10px; flex: 1 1 380px; min-width: 0; }
+.dual { position: relative; flex: 1; min-width: 110px; height: 26px; }
+.dual .rail, .dual .fill { position: absolute; top: 11px; height: 4px; border-radius: 2px; }
+.dual .rail { left: 0; right: 0; background: rgba(255,255,255,.3); }
+.dual .fill { background: #56B4E9; }
+.dual input[type=range] { position: absolute; left: 0; top: 0; width: 100%; height: 26px; margin: 0; background: none;
+                          -webkit-appearance: none; appearance: none; pointer-events: none; }
+.dual input[type=range]::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+.dual input[type=range]::-moz-range-track { height: 4px; background: transparent; }
+.dual input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 18px; height: 18px; margin-top: -7px;
+                          border-radius: 50%; background: #fff; border: 2px solid #56B4E9; cursor: pointer; }
+.dual input[type=range]::-moz-range-thumb { pointer-events: auto; width: 14px; height: 14px; border-radius: 50%;
+                          background: #fff; border: 2px solid #56B4E9; cursor: pointer; }
+.dual input[type=range]:focus-visible::-webkit-slider-thumb { outline: 2px solid #fff; outline-offset: 2px; }
+@media (max-width: 600px) { .filters .range { flex-basis: 100%; flex-wrap: wrap; } .dual { order: 3; flex-basis: 100%; } }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--gap); margin-bottom: var(--gap); }
 .kpi { background: var(--card); border-radius: var(--radius); padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .kpi .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
@@ -83,8 +100,15 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
           <option value="60">60 Tage</option>
           <option value="90" selected>90 Tage</option>
           <option value="0">Alles</option>
+          <option value="custom">Eigener Zeitraum</option>
         </select>
       </label>
+      <div class="range" role="group" aria-label="Zeitraum von bis">
+        <input type="date" id="f-from" aria-label="Anfangsdatum">
+        <div class="dual"><div class="rail"></div><div class="fill" id="f-fill"></div>
+          <input type="range" id="f-r1" aria-label="Anfangsdatum (Schieberegler)"><input type="range" id="f-r2" aria-label="Enddatum (Schieberegler)"></div>
+        <input type="date" id="f-to" aria-label="Enddatum">
+      </div>
       <label>Aktivitätstyp
         <select id="f-group"><option value="all">Alle</option></select>
       </label>
@@ -158,10 +182,11 @@ const isoWeek = t => { const d = new Date(t); d.setUTCDate(d.getUTCDate() + 3 - 
   const w1 = Date.UTC(d.getUTCFullYear(), 0, 4); return 1 + Math.round(((d - w1) / DAY - 3 + ((new Date(w1).getUTCDay() + 6) % 7)) / 7); };
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
-const state = { days: 90, group: "all", hideBad: true, sortField: "start", sortDir: "desc" };
+const state = { from: 0, to: 0, group: "all", hideBad: true, sortField: "start", sortDir: "desc" };
 const maxT = Math.max(...DAILY.map(r => tOf(r.date)));
 const minT = Math.min(...DAILY.map(r => tOf(r.date)));
 const charts = {};
+Object.assign(state, presetRange(90, minT, maxT));
 
 // ---- Daten aufbereiten -------------------------------------------------------
 function prepDaily() {
@@ -181,13 +206,32 @@ function prepDaily() {
   return rows;
 }
 const inRange = (t, from, to) => t >= from && t <= to;
-function range() {
-  const len = state.days === 0 ? Infinity : state.days;
-  const from = len === Infinity ? -Infinity : maxT - (len - 1) * DAY;
-  // Vorzeitraum nur, wenn er vollständig von Daten abgedeckt ist (sonst irreführende Prozentwerte)
-  const prev = (len === Infinity || from - len * DAY < minT) ? null : [from - len * DAY, from - DAY];
-  return { from, to: maxT, prev };
+// <dateRange>
+// Zeitraum-Logik (rein, ohne DOM; getestet in tests/js/test_date_range.mjs). Zeiten sind UTC-Mitternacht je Tag.
+// presetRange: letzte `days` Tage einschließlich des letzten Datentags (0 = alles).
+function presetRange(days, minT, maxT) {
+  return { from: days === 0 ? minT : Math.max(minT, maxT - (days - 1) * DAY), to: maxT };
 }
+// clampRange: auf ganze Tage runden, vertauschte Grenzen tauschen, auf den Datenbereich begrenzen.
+function clampRange(from, to, minT, maxT) {
+  let a = Math.round(from / DAY) * DAY, b = Math.round(to / DAY) * DAY;
+  if (a > b) [a, b] = [b, a];
+  const lim = t => Math.min(maxT, Math.max(minT, t));
+  return { from: lim(a), to: lim(b) };
+}
+// prevRange: gleich langer Zeitraum direkt davor, nur wenn er vollständig von Daten abgedeckt ist
+// (sonst irreführende Prozentwerte).
+function prevRange(from, to, minT) {
+  const len = Math.round((to - from) / DAY) + 1, pf = from - len * DAY;
+  return pf < minT ? null : [pf, from - DAY];
+}
+// matchPreset: Voreinstellung (Tage, 0 = alles), die genau diesem Zeitraum entspricht, sonst null.
+function matchPreset(from, to, minT, maxT, presets = [30, 60, 90, 0]) {
+  const hit = presets.find(p => { const r = presetRange(p, minT, maxT); return r.from === from && r.to === to; });
+  return hit === undefined ? null : hit;
+}
+// </dateRange>
+function range() { return { from: state.from, to: state.to, prev: prevRange(state.from, state.to, minT) }; }
 const actT = a => tOf(a.start);
 
 // <weightChange>
@@ -260,7 +304,7 @@ function extraKpis(daily, from, to) {
   const band = a == null ? "" : a < 0.8 ? "niedrig (Untertraining)" : a <= 1.3 ? "ausgewogen" : a <= 1.5 ? "erhöht" : "hoch";
   const bcls = a == null ? "" : (a > 1.5 ? "bad" : a >= 0.8 && a <= 1.3 ? "good" : "");
   const warn = d.filter(r => r.rec_low).length;
-  const warn14 = daily.filter(r => inRange(r.t, maxT - 13 * DAY, maxT) && r.rec_low).length;
+  const warn14 = daily.filter(r => inRange(r.t, to - 13 * DAY, to) && r.rec_low).length;
   const pmNow = d.length ? d[d.length - 1] : null, pm7 = d.length > 7 ? d[d.length - 8] : null;
   const hrLow = !!P.hr_low;   // 30-s-Spitze liegt über HFmax plus Sensor-Toleranz (in R berechnet)
   const lastOf = k => { const r = [...d].reverse().find(x => x[k] != null); return r ? r[k] : null; };
@@ -282,7 +326,7 @@ function extraKpis(daily, from, to) {
     (wLast ? `<div class="kpi"><div class="l">Gewicht</div><div class="v">${nf(wLast.weight_kg, 1)}<small>kg</small></div><div class="d">${wText}</div></div>` : "");
   return more + `<div class="kpi"><div class="l">ACWR aktuell</div><div class="v">${nf(a, 2)}</div><div class="d ${bcls}">${band}</div></div>` +
     `<div class="kpi"><div class="l">Form (Fitness − Ermüdung)</div><div class="v">${nf(pmNow ? pmNow.tsb : null, 1)}</div><div class="d">${pmNow ? "Fitness " + nf(pmNow.ctl, 1) + " · Ermüdung " + nf(pmNow.atl, 1) : ""}${pm7 ? " · vor 7 Tagen " + nf(pm7.tsb, 1) : ""}</div></div>` +
-    `<div class="kpi"><div class="l">Tage mit niedrigem Erholungs-Index (≤ ${nf(META.rec_index.threshold, 1)})</div><div class="v">${warn}</div><div class="d ${warn14 >= 3 ? "bad" : ""}">${warn14} in den letzten 14 Tagen</div></div>` +
+    `<div class="kpi"><div class="l">Tage mit niedrigem Erholungs-Index (≤ ${nf(META.rec_index.threshold, 1)})</div><div class="v">${warn}</div><div class="d ${warn14 >= 3 ? "bad" : ""}">${warn14} in den letzten 14 Tagen des Zeitraums</div></div>` +
     `<div class="kpi"><div class="l">HFmax (Zonen-Basis)</div><div class="v">${P.hrmax}<small>bpm</small></div><div class="d ${hrLow ? "bad" : ""}">${P.hrmax_source}${hrLow ? " · vermutlich zu niedrig (30-s-Spitze bis " + nf(P.obs_max) + ")" : ""}</div></div>`;
 }
 
@@ -558,12 +602,12 @@ function updateCharts(daily) {
   updateLoadCharts(d, L);
 
   // Wochen (Mo-So), lückenlos vom Zeitraumanfang bis heute
-  const firstT = d.length ? d[0].t : maxT;
-  const weeks = []; for (let w = monday(firstT); w <= maxT; w += 7 * DAY) weeks.push(w);
+  const firstT = d.length ? d[0].t : to;
+  const weeks = []; for (let w = monday(firstT); w <= to; w += 7 * DAY) weeks.push(w);
   const acts = ACTS.filter(a => inRange(actT(a), from, to) && (state.group === "all" || a.group === state.group));
   const groups = Object.keys(GROUP_COLORS).filter(g => acts.some(a => a.group === g));
   const wc = charts["c-week"];
-  const startT = Math.max(from, minT), partialWeek = w => w < startT || w + 6 * DAY > maxT;   // angeschnitten oder noch laufend
+  const startT = Math.max(from, minT), partialWeek = w => w < startT || w + 6 * DAY > to;   // angeschnitten oder noch laufend
   const wlabel = w => "KW " + isoWeek(w) + (partialWeek(w) ? "*" : "");
   wc.data.labels = weeks.map(wlabel);
   wc.data.datasets = groups.map(g => ({ label: g, backgroundColor: ctx => GROUP_COLORS[g] + (partialWeek(weeks[ctx.dataIndex]) ? "80" : ""),
@@ -623,11 +667,35 @@ function refresh() {
   const daily = prepDaily();
   renderKPIs(daily); updateCharts(daily); renderTable(); renderRecovery(); renderTrends(); renderZones();
 }
+function setupRange() {
+  const $ = id => document.getElementById(id);
+  const r1 = $("f-r1"), r2 = $("f-r2"), fromI = $("f-from"), toI = $("f-to"), fill = $("f-fill"), sel = $("f-days");
+  const N = Math.max(1, Math.round((maxT - minT) / DAY));
+  [r1, r2].forEach(r => { r.min = 0; r.max = N; r.step = 1; });
+  fromI.min = toI.min = dOf(minT); fromI.max = toI.max = dOf(maxT);
+  let pending = false;
+  const queueRefresh = () => { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; refresh(); }); } };
+  const sync = () => {                                       // Bedienelemente an state angleichen
+    const a = Math.round((state.from - minT) / DAY), b = Math.round((state.to - minT) / DAY);
+    r1.value = a; r2.value = b; fromI.value = dOf(state.from); toI.value = dOf(state.to);
+    fill.style.left = (a / N * 100) + "%"; fill.style.width = ((b - a) / N * 100) + "%";
+    r1.style.zIndex = a > N / 2 ? 3 : 1; r2.style.zIndex = 2;   // der Anfangsregler bleibt greifbar, wenn beide am rechten Rand liegen
+    const p = matchPreset(state.from, state.to, minT, maxT);
+    sel.value = p === null ? "custom" : String(p);
+  };
+  const set = (from, to) => { Object.assign(state, clampRange(from, to, minT, maxT)); sync(); queueRefresh(); };
+  r1.oninput = () => { if (+r1.value > +r2.value) r1.value = r2.value; set(minT + r1.value * DAY, minT + r2.value * DAY); };
+  r2.oninput = () => { if (+r2.value < +r1.value) r2.value = r1.value; set(minT + r1.value * DAY, minT + r2.value * DAY); };
+  const fromDate = () => { if (!fromI.value || !toI.value) return sync(); set(tOf(fromI.value), tOf(toI.value)); };
+  fromI.onchange = toI.onchange = fromDate;
+  sel.onchange = e => { if (e.target.value === "custom") return sync(); Object.assign(state, presetRange(+e.target.value, minT, maxT)); sync(); queueRefresh(); };
+  sync();
+}
 function init() {
   const groups = [...new Set(ACTS.map(a => a.group))].sort();
   const sel = document.getElementById("f-group");
   groups.forEach(g => { const o = document.createElement("option"); o.value = g; o.textContent = g; sel.appendChild(o); });
-  document.getElementById("f-days").onchange = e => { state.days = +e.target.value; refresh(); };
+  setupRange();
   sel.onchange = e => { state.group = e.target.value; refresh(); };
   document.getElementById("f-bad-label").textContent = `Nächte < ${MIN_SLEEP_H} h ausblenden`;
   document.getElementById("f-bad").onchange = e => { state.hideBad = e.target.checked; refresh(); };

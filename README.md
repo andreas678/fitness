@@ -7,6 +7,7 @@ Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholu
 ## Was herauskommt
 
 - **`_outputs/fitness_dashboard.html`**: interaktives Dashboard (Kennzahlen, Trainingsbelastung, ACWR, Aufbau und Ermüdung, Erholungs-Index, Anpassungs-Trends, HRV, Schlaf, Gewichtstrend, Herzfrequenzzonen, Aktivitätstabelle).
+  Der Zeitraum lässt sich über die Voreinstellungen (30, 60, 90 Tage, alles) oder frei einstellen: Doppel-Schieberegler und Datumsfelder für Anfang und Ende. Die Vergleichswerte beziehen sich auf den gleich langen Zeitraum davor. Die Anpassungs-Trends (feste 12 Wochen) und die Erholung nach HIIT (gesamte Datenbasis) sind vom Zeitraum unabhängig.
 - **`_outputs/*.png`**: Einzelgrafiken und `fitness_dashboard.png` (Schritte, Ruhepuls, Schlaf, Wochenumfang, Rad-Kilometer, Puls je Aktivität, Body Battery).
 - Konsolenausgabe mit Kurzauswertung, Plausibilitätsprüfung und Sensitivitätstabelle.
 
@@ -97,6 +98,7 @@ from,to,note,load_unknown,short_sleep_real
 Rscript tests/testthat.R                                                  # R-Tests
 ~/.virtualenvs/r-garmin/bin/python -m unittest discover -s tests/python   # Python-Tests
 node tests/js/test_weight_change.mjs                                      # JavaScript-Test (Gewichtstrend)
+node tests/js/test_date_range.mjs                                         # JavaScript-Test (Zeitraum-Auswahl)
 ```
 
 `tests/audit/` enthält Skripte aus der Methodenprüfung und der Trainingsentwicklung (Sensitivitäts- und Plausibilitätsrechnungen auf den echten Daten über den Produktionsweg, brauchen `data/`).
