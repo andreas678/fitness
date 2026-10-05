@@ -139,6 +139,8 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
         <div><div class="trend-t">HRV nachts</div><div class="chartbox short"><canvas id="c-tr-hrv_night"></canvas></div></div>
         <div><div class="trend-t">Puls im Schlaf</div><div class="chartbox short"><canvas id="c-tr-sleep_hr"></canvas></div></div></div>
       <div class="mini-wrap" id="trends-table"></div><div class="note" id="trends-note"></div></div>
+    <div class="card" id="weather-card"><h3 id="wx-title">Temperatur und Ruhepuls</h3><div class="sub" id="wx-sub"></div><div class="chartbox"><canvas id="c-wx"></canvas></div>
+      <div class="mini-wrap" id="wx-table"></div><div class="note" id="wx-note"></div></div>
     <div class="card" id="recovery-card"></div>
     <div class="card" id="zones-card"></div>
   </section>
@@ -416,6 +418,13 @@ function makeCharts() {
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.y == null ? "" : `${c.dataset.label}: ${nf(c.parsed.y, 1)} ${unit}` } } },
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: unit } } } }) });
   trendChart("c-tr-resting_hr", "bpm"); trendChart("c-tr-hrv_night", "ms"); trendChart("c-tr-sleep_hr", "bpm");
+  mk("c-wx", { type: "bar", data: { labels: [], datasets: [
+      { type: "bar", label: "Höchsttemperatur", data: [], backgroundColor: [], yAxisID: "y2", order: 2 },
+      { type: "line", label: "Ruhepuls (7-Tage-Mittel)", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25, spanGaps: true, yAxisID: "y", order: 1 }] },
+    options: baseOpts({ plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+        tooltip: { callbacks: { label: c => c.parsed.y == null ? "" : `${c.dataset.label}: ${nf(c.parsed.y, 1)} ${c.datasetIndex === 0 ? "°C" : "bpm"}`, footer: dayFooter } } },
+      scales: { x: gridX(false), y: { position: "left", beginAtZero: false, grid: { color: css("--grid") }, title: { display: true, text: "Ruhepuls (bpm)" } },
+        y2: { position: "right", grid: { display: false }, title: { display: true, text: "Höchsttemperatur (°C)" }, suggestedMin: 0 } } }) });
   mk("c-flags", { type: "bar", data: { labels: [], datasets: [{ label: "Erholungs-Index", data: [], backgroundColor: [] }] },
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: {
         label: c => { const r = flagRows[c.dataIndex]; const s = [r.sig_rhr && "Ruhepuls erhöht", r.sig_sleep && "Schlaf-Score niedrig", r.sig_bb && "Body Battery niedrig", r.sig_hrv && "HRV niedrig"].filter(Boolean);
@@ -498,6 +507,7 @@ function updateLoadCharts(d, L) {
   charts["c-form"].data.datasets[0].backgroundColor = d.map(r => (r.tsb >= 0 ? "#56B4E9" : "#E69F00") + (r.pmc_gap || r.pmc_warmup ? "66" : ""));
   setData("c-form", L, [d.map(r => r.tsb)]);
   renderPmcNote(d);
+  updateWeather(d, L);
   const rh = r => r.resting_hr;                             // Artefakte sind in prepDaily schon entfernt
   setData("c-rhrbase", L, [d.map(r => r.rhr_lo), d.map(r => r.rhr_hi), d.map(r => r.rhr_base), d.map(rh)]);
   const c = charts["c-rhrbase"]; c.data.datasets[3].pointBackgroundColor = d.map(r => r.sig_rhr ? "#B3261E" : "#E69F00");
@@ -517,6 +527,31 @@ function updateLoadCharts(d, L) {
   document.getElementById("flags-sub").textContent =
     `Mittel aus Ruhepuls (erhöht), Schlaf-Score, Body-Battery-Höchstwert und HRV (jeweils gegen die eigene 28-Tage-Baseline, niedriger = schlechter). ` +
     `Die vier Signale überlappen und entsprechen etwa ${nf(META.rec_index.n_eff, 1)} unabhängigen; rot ab ${nf(META.rec_index.threshold, 1)}. Beschreibend, nicht an einem Ergebnis geprüft.`;
+}
+const HEAT_C = 30;   // Hitzetag (DWD): Höchsttemperatur ab 30 °C
+function updateWeather(d, L) {
+  const W = META.weather, card = document.getElementById("weather-card");
+  if (!W || !W.n_days) { card.style.display = "none"; return; }
+  document.getElementById("wx-title").textContent = `Temperatur (${W.place}) und Ruhepuls`;
+  charts["c-wx"].data.datasets[0].backgroundColor = d.map(r => r.tmax != null && r.tmax >= HEAT_C ? "#D55E00" : "#F2C9A0");
+  setData("c-wx", L, [d.map(r => r.tmax), d.map(r => r.rhr_7d)]);
+  const hot = d.filter(r => r.tmax != null && r.tmax >= HEAT_C).length;
+  document.getElementById("wx-sub").textContent =
+    `Balken: Tageshöchsttemperatur am Wohnort (${W.place}, Quelle ${W.source}), dunkel ab ${HEAT_C} °C (Hitzetag). Linie: Ruhepuls als 7-Tage-Mittel. Hitzetage im Zeitraum: ${hot}.`;
+}
+function renderWeather() {
+  const W = META.weather, FX = WEATHER_FX;
+  if (!W || !W.n_days) return;
+  const NAMES = { resting_hr: ["Ruhepuls", 2], sleep_hr: ["Puls im Schlaf", 2], hrv_night: ["HRV nachts", 1], sleep_h: ["Schlafdauer", 2], stress_avg: ["Stress (Garmin-Wert)", 2] };
+  const fmtP = p => p == null ? "–" : p < 0.001 ? "&lt; 0,001" : nf(p, 3);
+  const sg = (v, d) => (v > 0 ? "+" : "") + nf(v, d);
+  const rows = FX.map(r => { const [name, dec] = NAMES[r.metric] || [r.metric, 2];
+    return `<tr><td>${name}</td><td class="num">${sg(r.effect, dec)} ${r.effect_unit.replace(" je +5 °C", "")} <small>[${sg(r.lo, dec)}; ${sg(r.hi, dec)}]</small></td><td class="num">${fmtP(r.p_holm)}</td><td class="num">${r.n}</td><td>${r.verdict}</td></tr>`; }).join("");
+  document.getElementById("wx-table").innerHTML = FX.length
+    ? `<table class="mini"><thead><tr><th>Kennwert</th><th>Effekt je +5 °C Höchsttemperatur [95 %-KI]</th><th>p (Holm)</th><th>Tage</th><th>Urteil</th></tr></thead><tbody>${rows}</tbody></table>` : "";
+  document.getElementById("wx-note").textContent =
+    `Die Tabelle gilt für die gesamte Datenbasis (Tageswerte). Sie rechnet je Kennwert eine lineare Regression auf das Mittel der Höchsttemperatur von Tag und zwei Vortagen, mit Newey-West-Intervall und p-Wert nach Holm über die ${FX.length} Kennwerte. ` +
+    `Annotierte Zeiträume (z. B. Segeltörn) zählen nicht, weil der Aufenthaltsort dort nicht Hamburg war. Temperatur hängt mit Jahreszeit, Urlaub und Training zusammen; ein fehlender Zusammenhang im Tageswert schließt eine Wirkung einzelner Hitzewellen nicht aus. Beschreibend, keine Ursache.`;
 }
 function renderTrends() {
   const card = document.getElementById("trends-card"), T = TRENDS;
@@ -665,7 +700,7 @@ function renderTable() {
 // ---- Steuerung -----------------------------------------------------------------
 function refresh() {
   const daily = prepDaily();
-  renderKPIs(daily); updateCharts(daily); renderTable(); renderRecovery(); renderTrends(); renderZones();
+  renderKPIs(daily); updateCharts(daily); renderTable(); renderRecovery(); renderTrends(); renderWeather(); renderZones();
 }
 function setupRange() {
   const $ = id => document.getElementById(id);

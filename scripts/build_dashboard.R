@@ -19,6 +19,7 @@ suppressPackageStartupMessages({
 })
 source(here("scripts", "helpers.R"))
 source(here("scripts", "load_recovery.R"))
+source(here("scripts", "weather.R"))
 
 RECALC <- "--recalc-profile" %in% commandArgs(trailingOnly = TRUE)   # feste Referenzwerte neu bestimmen
 RIDE_GAP_MIN <- 30    # wie in garmin_fitness.R
@@ -27,6 +28,9 @@ RIDE_MIN_MIN <- 3
 ann       <- read_annotations()      # data/annotations.csv: bekannte Zeiträume (Segeln, Nachtwachen ...)
 daily_raw <- read_csv(here("data", "garmin_daily.csv"), show_col_types = FALSE) |>
   apply_annotations(ann)
+wx_raw <- if (file.exists(here("data", "weather.csv")))                      # Tagestemperaturen (scripts/update_weather.R)
+  read_csv(here("data", "weather.csv"), show_col_types = FALSE, col_types = cols(date = col_date(), .default = col_double())) else weather_empty()
+if (nrow(wx_raw) > 0) daily_raw <- daily_raw |> mutate(date = as.Date(date)) |> left_join(wx_raw, by = "date")
 if (nrow(ann) > 0) message(sprintf("Annotationen: %d Zeitraum/Zeiträume, %d Tage beschriftet.", nrow(ann), sum(!is.na(daily_raw$ann_note))))
 
 acts_m <- read_csv(here("data", "garmin_activities.csv"), show_col_types = FALSE,
@@ -95,6 +99,7 @@ daily <- dl |>
          bb_high, bb_low, sleep_h, deep_h, light_h, rem_h, awake_h, sleep_score,
          hiit, unrecorded, no_wear, load_unknown, ann_note, load_meas, load_est, acute_d, chronic_d, acwr, acwr_meas,
          rhr_base, rhr_lo, rhr_hi, sig_rhr, sig_sleep, sig_bb, sig_hrv, flags, rec_index, rec_low, ctl, atl, tsb, pmc_gap, pmc_warmup,
+         any_of(c("tmax", "tmin", "tmean")),
          sleep_bad, rhr_bad, partial,
          any_of(c("bed_h", "wake_h", "sleep_need_min", "sleep_hr", "sleep_stress", "awake_count",
                   "restless", "spo2_avg", "spo2_low", "resp_sleep", "skin_temp_dev", "bb_sleep_change",
@@ -119,6 +124,9 @@ trends_payload <- list(
   trend  = trends$trend |> mutate(across(c(slope, lo, hi), ~ round(.x, 3))),
   first_week = format(trends$window$first_week), last_week = format(trends$window$last_week))
 
+wx_fx <- if (nrow(wx_raw) > 0) weather_effects(daily_raw) else weather_effects_empty()   # Tag-Ebene, ohne annotierte Zeiträume
+wx_place <- weather_place()$place
+
 wtrend <- if (!is.null(weight_raw)) weight_trend(weight_raw) else NULL   # NULL bei zu wenigen Wiegungen
 weights_trend <- if (is.null(wtrend)) tibble(date = character(), fit = numeric(), lo = numeric(), hi = numeric()) else
   wtrend |> transmute(date = format(date), fit = round(fit, 2), lo = round(lo, 2), hi = round(hi, 2))
@@ -133,6 +141,7 @@ meta <- list(
   rec_index = list(n_eff = round(rec_info$n_eff, 2), threshold = REC_INDEX_THRESHOLD),   # effektive Zahl unabhängiger Signale
   pmc = list(tau_fit = formals(fitness_fatigue)$tau_fit, tau_fat = formals(fitness_fatigue)$tau_fat,
              sens = mutate(pmc_sens, across(where(is.numeric), ~ round(.x, 1)))),
+  weather = list(place = wx_place, n_days = if ("tmax" %in% names(daily)) sum(!is.na(daily$tmax)) else 0L, source = "Open-Meteo"),
   min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR,                 # Schwellen aus helpers.R, vom Dashboard mitgenutzt
   sleep_cols = c(SLEEP_COLS, "bed_h", "wake_h"),                # bei ungültiger Nacht ausblendbar
   garmin_zones = if (!is.null(zones_raw) && nrow(zones_raw) > 0)
@@ -154,6 +163,7 @@ payload <- paste0(
   "const WEIGHT = ", to_json(weights), ";\n",
   "const WEIGHT_TREND = ", to_json(weights_trend), ";\n",
   "const TRENDS = ", to_json(trends_payload), ";\n",
+  "const WEATHER_FX = ", to_json(mutate(wx_fx, across(c(effect, lo, hi), ~ round(.x, 3)))), ";\n",
   "const RECOVERY = ", to_json(mutate(recov, across(where(is.numeric), ~ round(.x, 4)))), ";\n",
   "const META = ", toJSON(meta, auto_unbox = TRUE, dataframe = "rows", na = "null"), ";\n")
 
@@ -193,6 +203,8 @@ message(sprintf("Letzte 14 Tage: %d Tage mit Erholungs-Index <= %.1f, ACWR aktue
                 sum(last$rec_low), REC_INDEX_THRESHOLD, tail(na.omit(dl$acwr), 1)))
 for (i in seq_len(nrow(trends$trend))) with(trends$trend[i, ],
   message(sprintf("  Trend %-10s %+.2f %s [%+.2f; %+.2f], %d Wochen: %s", metric, slope, slope_unit, lo, hi, n_weeks, verdict)))
+if (nrow(wx_fx) > 0) for (i in seq_len(nrow(wx_fx))) with(wx_fx[i, ],
+  message(sprintf("  Temperatur %s: %+.2f %s [%+.2f; %+.2f], n = %d: %s", metric, effect, effect_unit, lo, hi, n, verdict)))
 message(sprintf("Aufbau/Ermüdung heute: Fitness %.1f, Ermüdung %.1f, Form %.1f (Fitness je nach Behandlung unbekannter Tage %.1f bis %.1f)",
                 tail(dl$ctl, 1), tail(dl$atl, 1), tail(dl$tsb, 1), min(pmc_sens$ctl), max(pmc_sens$ctl)))
 message(sprintf("  Die vier Erholungs-Signale entsprechen %.1f unabhängigen (Korrelation Schlaf-Score/Body Battery %.2f).",

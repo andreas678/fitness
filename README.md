@@ -34,6 +34,7 @@ Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholu
    | `GENDER` | `male` oder `female` (Faktor der Belastungsformel). |
    | `HRMAX` | Dein HFmax-Wert. Am besten per Feldtest oder mit Brustgurt ermittelt. Ohne Angabe wird er nach Tanaka geschätzt (208 − 0,7 × Alter, Streuung etwa ±10 bpm). |
    | `RHR_REF` | Optional: feste Ruhepuls-Referenz. Ohne Angabe wird sie einmal berechnet und gespeichert. |
+   | `WEATHER_LAT`, `WEATHER_LON`, `WEATHER_PLACE` | Optional: Ort für die Tagestemperaturen. Ohne Angabe Hamburg (53,55 / 9,99). |
 
 ## Benutzung
 
@@ -42,6 +43,7 @@ Aus dem Projektordner:
 ```bash
 Rscript scripts/garmin_fitness.R              # Daten holen (inkrementell) und Grafiken erzeugen
 Rscript scripts/build_dashboard.R             # Dashboard aus den gespeicherten Daten bauen
+Rscript scripts/update_weather.R              # Tagestemperaturen nachladen (Open-Meteo, braucht Internet; garmin_fitness.R macht das ebenfalls)
 ```
 
 Optionen:
@@ -65,6 +67,7 @@ Der Ordner `data/` ist git-ignoriert, denn er enthält Gesundheits- und Standort
 | `garmin_activity_zones.csv` | Zeit in Herzfrequenzzonen je Aktivität |
 | `garmin_activity_hr.csv` | Spitzenpuls je Aktivität (30-Sekunden-Mittel aus der Pulskurve) |
 | `garmin_weight.csv` | Wiegungen |
+| `weather.csv` | Tagestemperaturen (Höchst-, Tiefst-, Mittelwert) am Wohnort aus Open-Meteo |
 | `profile.json` | feste Referenzwerte (Ruhepuls, Pendel-Puls in bpm) |
 | `annotations.csv` | bekannte Zeiträume, optional (siehe unten) |
 
@@ -87,6 +90,7 @@ from,to,note,load_unknown,short_sleep_real
 - **Erholungs-Index:** Ruhepuls, Schlaf-Score, Body-Battery-Höchstwert und HRV (auf der ln-Skala) jeweils gegen die eigene 28-Tage-Baseline (z-Wert, niedriger = schlechter). Die vier Signale überlappen (Schlaf-Score und Body Battery r ≈ 0,77), sie entsprechen bei diesen Daten etwa 1,8 unabhängigen Signalen. Der Index ist daher das Mittel der z-Werte geteilt durch seine eigene Standardabweichung; ab −1,5 gilt ein Tag als auffällig (rund 6 % der Tage). Mindestens 3 der 4 Signale müssen vorliegen. Die Einzelsignale bleiben in der Grafik als Hinweistext sichtbar.
 - **Aufbau und Ermüdung:** Banister-Modell auf der Trainingslast (TRIMP): „Fitness“ ist das exponentiell gewichtete Mittel der Tageslast mit 42 Tagen Zeitkonstante, „Ermüdung“ dasselbe mit 7 Tagen, Form ist Fitness minus Ermüdung vom Vortag. Das misst aufgebaute Trainingslast, keine gemessene Leistung, und die Werte sind nicht mit TSS-Werten anderer Programme vergleichbar (deshalb keine Bereichsgrenzen). Tage mit unbekannter Last (Segeltörn, Uhr nicht getragen, heutiger Tag) frieren den Zustand ein und sind in der Grafik gestrichelt; der Hinweis im Dashboard nennt die Spannweite der Fitness, je nachdem, ob unbekannte Tage eingefroren, mit dem Median aufgefüllt oder als 0 gewertet werden. Start beim Mittel der ersten 14 Tage, die ersten 42 Tage gelten als Einschwingphase.
 - **Anpassungs-Trends:** Wochenmittel von Ruhepuls, HRV (ln) und Puls im Schlaf über die letzten 12 vollständigen Wochen mit linearer Trendgeraden und 95-%-Konfidenzintervall. Eine Woche zählt ab 4 gültigen Tagen; annotierte Wochen (ab 50 % der Tage) und unvollständige Wochen fehlen, unter 6 Wochen gibt es keinen Trend. Ein Zusammenhang, keine Ursache: Die Werte ändern sich auch durch Schlaf, Stress, Wärme und Krankheit.
+- **Temperatur:** Tageshöchsttemperatur am Wohnort (Standard Hamburg, Quelle Open-Meteo; gesendet werden nur Koordinaten und Zeitraum) als Balken neben dem Ruhepuls; Hitzetage ab 30 °C sind markiert. Die Tabelle schätzt je Kennwert (Ruhepuls, Puls im Schlaf, HRV, Schlafdauer, Stress) den Zusammenhang mit der Höchsttemperatur von Tag und zwei Vortagen: lineare Regression, Newey-West-Intervall, p nach Holm über die fünf Kennwerte, Effekt je +5 °C. Annotierte Zeiträume (Segeltörn) zählen nicht, weil der Ort dort nicht der Wohnort war. Beschreibend: Temperatur hängt mit Jahreszeit, Urlaub und Training zusammen, und ein fehlender Tageswert-Zusammenhang schließt eine Wirkung einzelner Hitzewellen nicht aus.
 - **Erholung nach HIIT:** Regressionsmodell mit dem Wochentag der Messung, Konfidenzintervall mit Newey-West-Standardfehlern, p-Werte nach Holm. Das Dashboard zeigt, auf wie vielen Wochentagen HIIT- und Vergleichstage vorkommen. Ein Zusammenhang, kein Kausalbeweis. Die Training Readiness wird nicht bewertet, weil sie Garmins eigene Last enthält.
 - **HFmax-Prüfung:** Vergleich mit dem höchsten 30-Sekunden-Mittel je Einheit. Werte weit über der Tanaka-Schätzung (+ 30 bpm) gelten als Sensorartefakt. HFmax wird nie automatisch angepasst.
 - **Gewichtstrend:** lokaler Trend mit 95-%-Band ab 8 Wiegungen. Die Änderung im gewählten Zeitraum (mit Konfidenzintervall) gibt es ab 6 Wiegungen, sonst steht dort „zu wenige für einen Trend“.
@@ -112,6 +116,8 @@ scripts/
   dashboard_template.html  Vorlage (Chart.js, Auswertung im Browser)
   helpers.R                gemeinsame Funktionen (Bereinigung, Annotationen, Referenzen, Prüfungen, Gewichts- und Anpassungstrends)
   load_recovery.R          Profil, TRIMP, ACWR, Fitness/Ermüdung, Baselines, Erholungs-Index, Erholungsmodell
+  weather.R                Tagestemperaturen (Abruf, Cache) und Zusammenhang mit den Tageswerten
+  update_weather.R         Tagestemperaturen allein nachladen
   garmin_extra.py          Garmin-Abrufe (Schlaf, HRV, Pulskurve, Zonen, Gewicht) mit Wiederholung bei Fehlern
 tests/                     R-, Python- und JavaScript-Tests, Audit-Skripte
 plans/                     Pläne und Ergebnisberichte (Methodenprüfung, Trainingsentwicklung)

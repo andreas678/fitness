@@ -105,6 +105,7 @@ roll_mean <- function(x, k = 7) {
 }
 
 source(here("scripts", "helpers.R"))   # activity_group(), merge_rides()
+source(here("scripts", "weather.R"))   # Tagestemperaturen (Open-Meteo)
 
 # ---- 3. Garmin-Connect-Zugriff -----------------------------------------------
 
@@ -390,6 +391,7 @@ if (DEMO) {
     invisible(update_weight(api))
     invisible(update_zones(api, acts))
     invisible(update_hr(api, acts))
+    invisible(update_weather_env(min(daily$date)))      # Tagestemperaturen für den Wohnort (data/weather.csv)
   } else {
     daily <- read_daily_cache(); acts <- read_act_cache()
   }

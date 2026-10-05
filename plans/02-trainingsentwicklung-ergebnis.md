@@ -40,3 +40,13 @@ Der Ruhepuls liegt von 52,2 bpm (KW 28) auf 55,3 bpm (KW 39). Der Sprung liegt �
 3. **Last unbekannter Zeiträume** bleibt unbekannt; die Fitness-Kurve ist dort eingefroren.
 4. **Schwelle und Trendfenster** (42/7 Tage, 12 Wochen, 4 gültige Tage) sind Konventionen, nicht an einem Ergebnis geprüft.
 5. **Beobachtung:** Ruhepuls-Anstieg weiter verfolgen; bei Fortsetzung Ursachen prüfen (Wärme, Schlaf, Krankheit).
+
+## Nachtrag: Temperatur und Ruhepuls (2026-10-05)
+
+Anlass: Der Ruhepuls-Trend (+0,26 bpm je Woche im festen 12-Wochen-Fenster) sollte erklärt werden; der Sommer war zeitweise sehr heiß.
+
+- **Der Trend ist weitgehend ein Fenster-Effekt:** Über alle 26 Wochen ist die Steigung −0,02 bpm je Woche [−0,11; +0,07]. Das Niveau war im April/Mai 54,2, im Juli 52,3 (Tief) und seit Ende August 54,7 bpm; das Fenster beginnt im Juli-Tief. Die Wertung „ungünstige Anpassung“ in diesem Bericht ist damit zu stark (siehe Beobachtung 0060).
+- **Temperatur (Hamburg, Open-Meteo) erklärt den Verlauf nicht:** Effekt je +5 °C Höchsttemperatur auf den Ruhepuls −0,01 bpm [−0,82; +0,80] (n = 146 Tage ohne Segeltörn). Mit Temperatur adjustiert wird die Steigung im Dashboard-Fenster nicht kleiner (+0,21 auf +0,33 bpm je Woche).
+- **Weitere Kennwerte:** Schlafdauer −0,12 h je +5 °C [−0,23; −0,00] und Stress +1,15 Punkte [+0,16; +2,14] sind nominal grenzwertig, nach Holm-Korrektur über fünf Kennwerte aber nicht belastbar (p 0,168 und 0,118).
+- **Hitzewelle 20.–28.06.** (bis 33,7 °C): Ruhepuls 55–61 bpm, HRV bis 26 ms, danach 50–53 bpm. In dieser einen Episode ist die Wirkung deutlich, über alle Tage nicht nachweisbar. Der Erholungs-Index markierte 22.–24.06.
+- **Grenzen:** Wetter nur am Wohnort; annotierte Zeiträume zählen nicht. 11 Hitzetage (≥ 30 °C) fallen in wenige Episoden, die effektive Stichprobe ist klein.
