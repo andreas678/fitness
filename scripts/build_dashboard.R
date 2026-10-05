@@ -70,6 +70,7 @@ message(sprintf("Referenz Ruhepuls: %.0f bpm (%s)%s", rhr_ref, rr$source,
 acts_s  <- session_load(acts_m, prof, COMMUTE_HRR, zones_raw)
 dl      <- daily_load_recovery(daily_raw, acts_s)
 rec_info <- attr(dl, "rec_index_info")
+pmc_sens <- pmc_sensitivity(dl$load, !dl$unrecorded & !dl$partial)   # Spannweite je Behandlung unbekannter Tage
 recov_x <- recovery_data(dl)                   # Folgetag-Werte je HIIT-/Nicht-HIIT-Tag
 recov   <- recovery_model(recov_x)             # wochentag-adjustiert, Newey-West (Paket sandwich)
 recov_design <- recovery_design(recov_x)       # Verteilung der Messtage über die Wochentage
@@ -87,13 +88,13 @@ daily <- dl |>
          stress_avg = ifelse(stress_avg < 0, NA, stress_avg),     # -1 = kein Wert
          bed_h = round(to_clock_h(sleep_start, TRUE), 2), wake_h = round(to_clock_h(sleep_end), 2),
          across(any_of(c("sig_rhr", "sig_sleep", "sig_bb", "sig_hrv", "unrecorded", "hiit",
-                         "sleep_bad", "rhr_bad", "partial", "no_wear", "load_unknown", "rec_low")), as.integer),
-         across(c(load_meas, load_est, acute_d, chronic_d, acwr, acwr_meas, rhr_base, rhr_lo, rhr_hi, rec_index),
+                         "sleep_bad", "rhr_bad", "partial", "no_wear", "load_unknown", "rec_low", "pmc_gap", "pmc_warmup")), as.integer),
+         across(c(load_meas, load_est, acute_d, chronic_d, acwr, acwr_meas, rhr_base, rhr_lo, rhr_hi, rec_index, ctl, atl, tsb),
                 ~ round(.x, 2))) |>
   select(date, steps, distance_km, resting_hr, kcal_active, intensity_min, stress_avg,
          bb_high, bb_low, sleep_h, deep_h, light_h, rem_h, awake_h, sleep_score,
          hiit, unrecorded, no_wear, load_unknown, ann_note, load_meas, load_est, acute_d, chronic_d, acwr, acwr_meas,
-         rhr_base, rhr_lo, rhr_hi, sig_rhr, sig_sleep, sig_bb, sig_hrv, flags, rec_index, rec_low,
+         rhr_base, rhr_lo, rhr_hi, sig_rhr, sig_sleep, sig_bb, sig_hrv, flags, rec_index, rec_low, ctl, atl, tsb, pmc_gap, pmc_warmup,
          sleep_bad, rhr_bad, partial,
          any_of(c("bed_h", "wake_h", "sleep_need_min", "sleep_hr", "sleep_stress", "awake_count",
                   "restless", "spo2_avg", "spo2_low", "resp_sleep", "skin_temp_dev", "bb_sleep_change",
@@ -124,6 +125,8 @@ meta <- list(
   ride_gap_min = RIDE_GAP_MIN, ride_min_min = RIDE_MIN_MIN, commute_hrr = COMMUTE_HRR,
   commute = list(n = commute$n, lo = commute$lo, hi = commute$hi, hr = commute$hr, source = commute$source),
   rec_index = list(n_eff = round(rec_info$n_eff, 2), threshold = REC_INDEX_THRESHOLD),   # effektive Zahl unabhängiger Signale
+  pmc = list(tau_fit = formals(fitness_fatigue)$tau_fit, tau_fat = formals(fitness_fatigue)$tau_fat,
+             sens = mutate(pmc_sens, across(where(is.numeric), ~ round(.x, 1)))),
   min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR,                 # Schwellen aus helpers.R, vom Dashboard mitgenutzt
   sleep_cols = c(SLEEP_COLS, "bed_h", "wake_h"),                # bei ungültiger Nacht ausblendbar
   garmin_zones = if (!is.null(zones_raw) && nrow(zones_raw) > 0)
@@ -181,6 +184,8 @@ if (peak$n_peak > 0) {
 if (peak$n_peak < peak$n_hr) message(sprintf("  Pulskurve für %d von %d Einheiten vorhanden (der Rest: garmin_fitness.R noch nicht gelaufen oder bei Garmin nicht verfügbar).", peak$n_peak, peak$n_hr))
 message(sprintf("Letzte 14 Tage: %d Tage mit Erholungs-Index <= %.1f, ACWR aktuell %.2f",
                 sum(last$rec_low), REC_INDEX_THRESHOLD, tail(na.omit(dl$acwr), 1)))
+message(sprintf("Aufbau/Ermüdung heute: Fitness %.1f, Ermüdung %.1f, Form %.1f (Fitness je nach Behandlung unbekannter Tage %.1f bis %.1f)",
+                tail(dl$ctl, 1), tail(dl$atl, 1), tail(dl$tsb, 1), min(pmc_sens$ctl), max(pmc_sens$ctl)))
 message(sprintf("  Die vier Erholungs-Signale entsprechen %.1f unabhängigen (Korrelation Schlaf-Score/Body Battery %.2f).",
                 rec_info$n_eff, rec_info$cor[2, 3]))
 message(sprintf("Dashboard geschrieben: %s (%d Tage, %d Aktivitäten, %.0f kB)",
