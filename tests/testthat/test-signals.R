@@ -48,7 +48,7 @@ test_that("HRV-z wird auf der ln-Skala gebildet", {
   acts <- tibble(start = as.POSIXct(paste(days, "08:00:00"), tz = "UTC"), trimp = 50, est = FALSE,
                  te_aerobic = NA_real_, type_key = "cycling")
   dl <- daily_load_recovery(daily, acts)
-  lg <- log(hrv); m <- roll_apply(lg, 28, mean, 14, lag_by = 1); s <- roll_apply(lg, 28, sd, 14, lag_by = 1)
+  lg <- log(hrv); m <- roll_apply(lg, days, 28, mean, 14, lag_by = 1); s <- roll_apply(lg, days, 28, sd, 14, lag_by = 1)
   expect_equal(dl$hrv_z, (lg - m) / s)
 })
 

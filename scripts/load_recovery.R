@@ -170,14 +170,7 @@ trimp_sensitivity <- function(acts, p, commute_hrr, zones = NULL, hrmax_delta = 
 }
 
 # ---- Tageswerte: Last, ACWR, Baselines, Erholungs-Signale -------------------------------
-roll_apply <- function(x, k, fun, min_n, lag_by = 0) {
-  vapply(seq_along(x), function(i) {
-    hi <- i - lag_by; lo <- hi - k + 1
-    if (hi < 1) return(NA_real_)
-    w <- x[max(1, lo):hi]; w <- w[!is.na(w)]
-    if (length(w) >= min_n) fun(w) else NA_real_
-  }, numeric(1))
-}
+# roll_apply() (rollierende Statistik über Kalendertage) steht in helpers.R
 
 # ---- Aufbau und Ermüdung (Banister / Performance-Management-Chart) -----------------------------
 # Zwei exponentiell gewichtete Mittel der Tageslast: "Fitness" (CTL, lange Zeitkonstante) und "Ermüdung"
@@ -257,13 +250,13 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
     hiit      = coalesce(hiit, FALSE),
     # unvollständige Tage (heute, Uhr nicht getragen) zählen nicht in die Mittel; ihre Last bleibt sichtbar
     load_acwr = ifelse(partial, NA_real_, load),
-    acute_d   = roll_apply(load_acwr, 7, mean, 5),      # mittlere Tageslast, letzte 7 Tage
-    chronic_d = roll_apply(load_acwr, 28, mean, 14),    # mittlere Tageslast, letzte 28 Tage
+    acute_d   = roll_apply(load_acwr, date, 7, mean, 5),      # mittlere Tageslast, letzte 7 Tage
+    chronic_d = roll_apply(load_acwr, date, 28, mean, 14),    # mittlere Tageslast, letzte 28 Tage
     acwr      = ifelse(!is.na(chronic_d) & chronic_d >= 1, acute_d / chronic_d, NA_real_),
     # Variante nur mit gemessener Last (ohne die pauschal geschätzten Pendelfahrten)
     load_meas_acwr = ifelse(partial, NA_real_, load_meas),
-    acute_m   = roll_apply(load_meas_acwr, 7, mean, 5),
-    chronic_m = roll_apply(load_meas_acwr, 28, mean, 14),
+    acute_m   = roll_apply(load_meas_acwr, date, 7, mean, 5),
+    chronic_m = roll_apply(load_meas_acwr, date, 28, mean, 14),
     acwr_meas = ifelse(!is.na(chronic_m) & chronic_m >= 1, acute_m / chronic_m, NA_real_)
   )
   d <- bind_cols(d, fitness_fatigue(d$load, !d$unrecorded & !d$partial))
@@ -274,7 +267,7 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
   sleep <- cl$sleep_score
   bb    <- cl$bb_high
   z <- function(x, k = 28, min_n = 14) {
-    m <- roll_apply(x, k, mean, min_n, lag_by = 1); s <- roll_apply(x, k, sd, min_n, lag_by = 1)
+    m <- roll_apply(x, d$date, k, mean, min_n, lag_by = 1); s <- roll_apply(x, d$date, k, sd, min_n, lag_by = 1)
     list(m = m, s = s, z = ifelse(!is.na(s) & s > 0, (x - m) / s, NA_real_))
   }
   hrv   <- if ("hrv_night" %in% names(cl)) cl$hrv_night else rep(NA_real_, nrow(d))

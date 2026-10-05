@@ -154,6 +154,24 @@ clean_daily <- function(daily, min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR, ext
   d
 }
 
+# ---- Rollierende Statistik über Kalendertage ---------------------------------------------------
+# Wendet `fun` auf die Werte der letzten k Kalendertage an, einschließlich des jeweiligen Tages (lag_by = 1:
+# Fenster endet am Vortag). Fehlende Kalendertage und NA zählen als fehlende Werte; bei weniger als min_n
+# Werten ist das Ergebnis NA. `date` muss aufsteigend und ohne Dubletten sein. Ein Fenster zählt also Tage, nicht
+# Zeilen: Datumslücken in den Tageswerten füllen das Fenster nicht mit älteren Zeilen auf.
+# Das JavaScript-Gegenstück (rollMean im Dashboard-Template) erfüllt dieselben Fälle: tests/fixtures/rolling.json.
+roll_apply <- function(x, date, k, fun, min_n, lag_by = 0) {
+  date <- as.Date(date)
+  if (length(x) != length(date)) stop(sprintf("roll_apply: x (%d) und date (%d) müssen gleich lang sein", length(x), length(date)))
+  if (anyNA(date) || anyDuplicated(date) || is.unsorted(date))
+    stop("roll_apply: date muss aufsteigend sein, ohne fehlende Werte und ohne Dubletten")
+  vapply(seq_along(x), function(i) {
+    hi <- date[i] - lag_by; lo <- hi - k + 1
+    w <- x[date >= lo & date <= hi]; w <- w[!is.na(w)]
+    if (length(w) >= max(min_n, 1)) fun(w) else NA_real_
+  }, numeric(1))
+}
+
 # ---- Annotationen: bekannte Zeiträume beschriften (data/annotations.csv, git-ignoriert) -------------
 # Spalten: from, to (JJJJ-MM-TT), note (Text), load_unknown (TRUE = Uhr getragen, aber Trainingslast
 # nicht erfasst, z. B. Segeln ohne Aufzeichnung), short_sleep_real (TRUE = kurze Nächte sind echt,

@@ -140,3 +140,44 @@ test_that("read_weight_cache liest die Wiegungen", {
   w <- read_weight_cache(f)
   expect_equal(nrow(w), 3); expect_s3_class(w$date, "Date"); expect_equal(w$weight_kg[2], 89.1)
 })
+
+# ---- Rollierende Statistik über Kalendertage ----------------------------------------------------
+test_that("roll_apply erfüllt die von Hand gerechneten Fälle (dieselben prüft rollMean im JavaScript)", {
+  fx <- jsonlite::fromJSON(here::here("tests", "fixtures", "rolling.json"), simplifyVector = FALSE)
+  num <- function(l) vapply(l, function(v) if (is.null(v)) NA_real_ else as.numeric(v), numeric(1))
+  for (cs in fx$cases) {
+    got <- roll_apply(num(cs$values), as.Date(unlist(cs$dates)), cs$k, mean, cs$min_n, lag_by = cs$lag_by)
+    expect_equal(got, num(cs$expected), info = cs$name)
+  }
+})
+
+test_that("roll_apply zählt Kalendertage, nicht Zeilen: eine Datumslücke füllt das Fenster nicht auf", {
+  d <- as.Date(c("2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04", "2026-01-10"))
+  r <- roll_apply(c(1, 2, 3, 4, 10), d, 7, mean, 3)
+  expect_true(is.na(r[5]))                           # im Fenster 4.-10.1. liegen nur 2 Tage mit Wert
+  expect_equal(r[4], 2.5)
+})
+
+test_that("roll_apply gibt mit beliebiger Funktion und lag_by das Fenster bis zum Vortag zurück", {
+  d <- as.Date("2026-01-01") + 0:5; x <- c(2, 4, 4, 4, 5, 5)
+  expect_equal(roll_apply(x, d, 3, sd, 3, lag_by = 1), c(NA, NA, NA, sd(x[1:3]), sd(x[2:4]), sd(x[3:5])))
+})
+
+test_that("roll_apply prüft die Datumsspalte", {
+  expect_error(roll_apply(1:3, as.Date("2026-01-01") + c(0, 0, 1), 7, mean, 1), "Dubletten")
+  expect_error(roll_apply(1:3, as.Date("2026-01-01") + c(2, 1, 0), 7, mean, 1), "aufsteigend")
+  expect_error(roll_apply(1:3, c(as.Date("2026-01-01"), NA, as.Date("2026-01-03")), 7, mean, 1), "fehlende Werte")
+  expect_error(roll_apply(1:3, as.Date("2026-01-01") + 0:1, 7, mean, 1), "gleich lang")
+})
+
+test_that("daily_load_recovery bildet ACWR-Fenster über Kalendertage, auch bei Lücken in den Tageswerten", {
+  days <- as.Date("2026-06-01") + 0:39
+  daily <- tibble(date = days, steps = 8000, resting_hr = 54, sleep_h = 7, sleep_score = 80, bb_high = 80, hrv_night = 40) |>
+    filter(!(date >= as.Date("2026-06-21") & date <= as.Date("2026-06-25")))      # fünf Tage fehlen in den Tageswerten
+  acts <- tibble(start = as.POSIXct(paste(days, "08:00:00"), tz = "UTC"), trimp = 50, est = FALSE,
+                 te_aerobic = NA_real_, type_key = "cycling")
+  dl <- daily_load_recovery(daily, acts)
+  at <- function(day) dl$acute_d[dl$date == as.Date(day)]
+  expect_true(is.na(at("2026-06-29")))               # Fenster 23.-29.6.: nur 4 Tage vorhanden (26.-29.6.)
+  expect_equal(at("2026-06-30"), 50)                 # Fenster 24.-30.6.: 5 Tage vorhanden (26.-30.6.)
+})

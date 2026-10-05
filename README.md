@@ -102,6 +102,7 @@ Rscript tests/testthat.R                                                  # R-Te
 node tests/js/test_weight_change.mjs                                      # JavaScript-Test (Gewichtstrend)
 node tests/js/test_date_range.mjs                                         # JavaScript-Test (Zeitraum-Auswahl)
 node tests/js/test_meta_constants.mjs                                    # JavaScript-Test (Template ohne eigene Konstanten-Literale)
+node tests/js/test_roll_mean.mjs                                         # JavaScript-Test (Rollmittel über Kalendertage, gleiche Fälle wie roll_apply in R: tests/fixtures/rolling.json)
 ```
 
 `tests/audit/` enthält Skripte aus der Methodenprüfung und der Trainingsentwicklung (Sensitivitäts- und Plausibilitätsrechnungen auf den echten Daten über den Produktionsweg, brauchen `data/`).

@@ -17,7 +17,7 @@ sk <- function(x){x<-x[!is.na(x)];mean((x-mean(x))^3)/sd(x)^3}
 cat("n:",sum(!is.na(R$hrv))," Schiefe roh:",round(sk(R$hrv),2)," ln:",round(sk(log(R$hrv)),2),"\n")
 cat("Schiefe Ruhepuls:",round(sk(R$rhr),2)," Schlaf:",round(sk(R$sleep),2)," BB:",round(sk(R$bb),2),"\n")
 cat("Anteil Tage hrv_z<=-1 roh:",round(mean(dl$hrv_z<=-1,na.rm=T),3),"\n")
-zl <- (function(x,k=28,min_n=14){m<-roll_apply(x,k,mean,min_n,1);s<-roll_apply(x,k,sd,min_n,1);ifelse(!is.na(s)&s>0,(x-m)/s,NA)})(log(R$hrv))
+zl <- (function(x,k=28,min_n=14){m<-roll_apply(x,dl$date,k,mean,min_n,1);s<-roll_apply(x,dl$date,k,sd,min_n,1);ifelse(!is.na(s)&s>0,(x-m)/s,NA)})(log(R$hrv))
 cat("Anteil Tage z_ln<=-1:",round(mean(zl<=-1,na.rm=T),3),"; Übereinstimmung der Flags roh/ln:",
     round(mean((dl$hrv_z<=-1)==(zl<=-1),na.rm=T),3),"; Korrelation z roh/ln:",round(cor(dl$hrv_z,zl,use="pair"),3),"\n")
 cat("\n== 3. Flag-Anzahl: beobachtet vs. unter Unabhängigkeit (gleiche Randhäufigkeiten) ==\n")
