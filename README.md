@@ -30,7 +30,7 @@ Holt Tages- und Trainingsdaten aus Garmin Connect, bewertet Belastung und Erholu
    |---|---|
    | `GARMIN_EMAIL`, `GARMIN_PASSWORD` | Zugang zu Garmin Connect. Nach dem ersten Login liegen Tokens in `~/.garminconnect`, danach wird kein Passwort mehr gebraucht (bei 2-Faktor-Anmeldung fragt das Skript einmal nach dem Code). |
    | `BIRTHDAY` | Geburtsdatum im Format `TT-MM-JJJJ` (für Alter und HFmax-Schätzung; wird nicht ausgegeben). |
-   | `GENDER` | `male` oder `female` (Faktor der Belastungsformel). |
+   | `GENDER` | `male` oder `female` (Koeffizienten der Belastungsformel: Männer 0,64·e^(1,92·x), Frauen 0,86·e^(1,67·x)). Ohne Angabe gilt „male“ mit einer Warnung. |
    | `HRMAX` | Dein HFmax-Wert. Am besten per Feldtest oder mit Brustgurt ermittelt. Ohne Angabe wird er nach Tanaka geschätzt (208 − 0,7 × Alter, Streuung etwa ±10 bpm). |
    | `RHR_REF` | Optional: feste Ruhepuls-Referenz. Ohne Angabe wird sie einmal berechnet und gespeichert. |
    | `WEATHER_LAT`, `WEATHER_LON`, `WEATHER_PLACE` | Optional: Ort für die Tagestemperaturen. Ohne Angabe Hamburg (53,55 / 9,99). |

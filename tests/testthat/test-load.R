@@ -127,3 +127,30 @@ test_that("trimp_sensitivity leitet die Pendel-HFR bei jeder HFmax-Variante neu 
     expect_equal(hm$trimp_total[i], expected)
   }
 })
+
+# ---- Banister-Koeffizienten (Männer 0,64 / 1,92, Frauen 0,86 / 1,67) ------------------------------
+test_that("banister rechnet mit dem Koeffizienten a (Handrechnung)", {
+  expect_equal(banister(60, 0.6, 1.92), 60 * 0.6 * 0.64 * exp(1.92 * 0.6))              # Standard: Männer
+  expect_equal(banister(60, 0.6, 1.67, 0.86), 60 * 0.6 * 0.86 * exp(1.67 * 0.6))
+  expect_equal(round(banister(60, 0.6, 1.67, 0.86), 1), 84.3)                           # Frauen, 60 min bei HRR 0,6
+  expect_equal(banister(60, 0.6, 1.92, NULL), banister(60, 0.6, 1.92))                  # fehlender Koeffizient: Männer
+})
+
+test_that("session_load nutzt trimp_a aus dem Profil: gleiche Einheit, Frau höher als Mann", {
+  act <- tibble(activity_id = "1", type_key = "hiit", avg_hr = 54 + 0.6 * (182 - 54), duration_min = 60)
+  pm <- list(rhr_ref = 54, hrmax = 182, trimp_a = 0.64, trimp_b = 1.92)
+  pf <- list(rhr_ref = 54, hrmax = 182, trimp_a = 0.86, trimp_b = 1.67)
+  expect_equal(session_load(act, pm)$trimp, banister(60, 0.6, 1.92, 0.64))
+  expect_equal(session_load(act, pf)$trimp, banister(60, 0.6, 1.67, 0.86))
+  expect_gt(session_load(act, pf)$trimp, session_load(act, pm)$trimp)
+})
+
+test_that("Zonen-TRIMP nutzt trimp_a ebenfalls", {
+  zones <- tibble(activity_id = "1", z1_low = 89, z2_low = 107, z3_low = 125, z4_low = 142, z5_low = 160,
+                  z1_s = 0, z2_s = 0, z3_s = 600, z4_s = 0, z5_s = 0)
+  pm <- list(rhr_ref = 54, hrmax = 182, trimp_a = 0.64, trimp_b = 1.92)
+  pf <- list(rhr_ref = 54, hrmax = 182, trimp_a = 0.86, trimp_b = 1.67)
+  hrr <- (133.5 - 54) / (182 - 54)                                                      # Mitte Z3: (125 + 142) / 2
+  expect_equal(zone_trimp(zones, pm)$trimp_z, banister(10, hrr, 1.92, 0.64))
+  expect_equal(zone_trimp(zones, pf)$trimp_z, banister(10, hrr, 1.67, 0.86))
+})
