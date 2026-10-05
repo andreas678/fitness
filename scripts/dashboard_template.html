@@ -113,6 +113,7 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
         <select id="f-group"><option value="all">Alle</option></select>
       </label>
       <label><input type="checkbox" id="f-bad" checked> <span id="f-bad-label">Nächte ausblenden</span></label>
+      <label id="f-wx-label" hidden><input type="checkbox" id="f-wx"> <span id="f-wx-text">Temperatur einblenden</span></label>
     </div>
   </header>
 
@@ -184,10 +185,14 @@ const isoWeek = t => { const d = new Date(t); d.setUTCDate(d.getUTCDate() + 3 - 
   const w1 = Date.UTC(d.getUTCFullYear(), 0, 4); return 1 + Math.round(((d - w1) / DAY - 3 + ((new Date(w1).getUTCDay() + 6) % 7)) / 7); };
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
-const state = { from: 0, to: 0, group: "all", hideBad: true, sortField: "start", sortDir: "desc" };
+const state = { from: 0, to: 0, group: "all", hideBad: true, showWeather: false, sortField: "start", sortDir: "desc" };
 const maxT = Math.max(...DAILY.map(r => tOf(r.date)));
 const minT = Math.min(...DAILY.map(r => tOf(r.date)));
 const charts = {};
+// Einstellungen im Browser merken (localStorage kann fehlen oder gesperrt sein: dann gilt der Standard)
+const PREF_PREFIX = "fitness-dashboard.";
+const loadPref = (k, dflt) => { try { const v = localStorage.getItem(PREF_PREFIX + k); return v === null ? dflt : v === "1"; } catch (e) { return dflt; } };
+const savePref = (k, v) => { try { localStorage.setItem(PREF_PREFIX + k, v ? "1" : "0"); } catch (e) { /* ignorieren */ } };
 Object.assign(state, presetRange(90, minT, maxT));
 
 // ---- Daten aufbereiten -------------------------------------------------------
@@ -532,10 +537,12 @@ function updateLoadCharts(d, L) {
 const HEAT_C = 30;   // Hitzetag (DWD): Höchsttemperatur ab 30 °C
 function updateWeather(d, L) {
   const W = META.weather, card = document.getElementById("weather-card");
-  if (!W || !W.n_days) { card.style.display = "none"; return; }
+  if (!W || !W.n_days || !state.showWeather) { card.style.display = "none"; return; }   // nur auf Wunsch (Checkbox im Kopf)
+  card.style.display = "";
   document.getElementById("wx-title").textContent = `Temperatur (${W.place}) und Ruhepuls`;
   charts["c-wx"].data.datasets[0].backgroundColor = d.map(r => r.tmax != null && r.tmax >= HEAT_C ? "#D55E00" : "#F2C9A0");
   setData("c-wx", L, [d.map(r => r.tmax), d.map(r => r.rhr_7d)]);
+  charts["c-wx"].resize();                                   // war die Karte ausgeblendet, hat das Diagramm noch keine Größe
   const hot = d.filter(r => r.tmax != null && r.tmax >= HEAT_C).length;
   document.getElementById("wx-sub").textContent =
     `Balken: Tageshöchsttemperatur am Wohnort (${W.place}, Quelle ${W.source}), dunkel ab ${HEAT_C} °C (Hitzetag). Linie: Ruhepuls als 7-Tage-Mittel. Hitzetage im Zeitraum: ${hot}.`;
@@ -739,6 +746,13 @@ function init() {
   sel.onchange = e => { state.group = e.target.value; refresh(); };
   document.getElementById("f-bad-label").textContent = `Nächte < ${MIN_SLEEP_H} h ausblenden`;
   document.getElementById("f-bad").onchange = e => { state.hideBad = e.target.checked; refresh(); };
+  const wxBox = document.getElementById("f-wx");
+  if (META.weather && META.weather.n_days) {                  // Checkbox nur, wenn Wetterdaten vorhanden sind
+    document.getElementById("f-wx-label").hidden = false;
+    document.getElementById("f-wx-text").textContent = `Temperatur (${META.weather.place}) einblenden`;
+    state.showWeather = loadPref("showWeather", false); wxBox.checked = state.showWeather;
+    wxBox.onchange = e => { state.showWeather = e.target.checked; savePref("showWeather", state.showWeather); refresh(); };
+  }
   document.getElementById("foot").textContent =
     `Daten bis ${new Date(maxT).toLocaleDateString("de-DE")} · erzeugt ${META.built} · Heute und gestern können unvollständig sein · ` +
     `Nächte unter ${MIN_SLEEP_H} h gelten als nicht getragen (abschaltbar).`;
