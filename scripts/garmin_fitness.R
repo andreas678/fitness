@@ -218,7 +218,12 @@ parse_activity <- function(a) {
 
 read_daily_cache <- function() {
   if (!file.exists(F_DAILY)) return(NULL)
-  read_csv(F_DAILY, show_col_types = FALSE) |> mutate(date = as.Date(date))
+  # Textspalten fest typisieren: read_csv würde "2026-10-01 22:44" sonst als Datum/Zeit lesen
+  read_csv(F_DAILY, show_col_types = FALSE,
+           col_types = cols(.default = col_guess(), sleep_start = col_character(),
+                            sleep_end = col_character(), hrv_status = col_character(),
+                            ready_level = col_character(), ts_status = col_character())) |>
+    mutate(date = as.Date(date))
 }
 read_act_cache <- function() {
   if (!file.exists(F_ACT)) return(NULL)
