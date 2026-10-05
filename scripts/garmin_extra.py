@@ -5,14 +5,30 @@ Integer überlaufen lässt (Zeitstempel in ms, IDs). Zurück nach R gehen nur kl
 Fließkommazahlen und Strings. Jeder Garmin-Aufruf ist einzeln abgesichert: fehlt ein
 Wert, kommt NA statt eines Abbruchs.
 """
+import time
 from datetime import datetime, timezone
 
 
+_RETRY_DELAYS = (1.0, 2.0)   # Wartezeit vor Versuch 2 und 3 (z. B. bei Rate-Limit)
+
+
+def _call(f, *args):
+    """Garmin-Aufruf mit bis zu drei Versuchen. Gibt (ok, wert) zurück:
+    ok=True  Aufruf gelungen (wert kann None/leer sein = Garmin hat für den Tag keine Daten)
+    ok=False Aufruf scheiterte dreimal (Netz, Rate-Limit, Anmeldung): wert=None.
+    Nur so lässt sich "keine Daten" von "Fehler" unterscheiden, bevor ein NA gecacht wird."""
+    for attempt in range(len(_RETRY_DELAYS) + 1):
+        try:
+            return True, f(*args)
+        except Exception:
+            if attempt < len(_RETRY_DELAYS):
+                time.sleep(_RETRY_DELAYS[attempt])
+    return False, None
+
+
 def _try(f, *args):
-    try:
-        return f(*args)
-    except Exception:
-        return None
+    """Wie _call, aber nur der Wert (None bei Fehler). Für Aufrufe, deren Ergebnis nicht als NA gecacht wird."""
+    return _call(f, *args)[1]
 
 
 def _g(d, *keys):
@@ -35,18 +51,26 @@ def _hours(sec):
 
 
 def extra_day(api, d):
-    """Schlaf, HRV, Training Readiness und Trainingsstatus eines Tages (4 API-Aufrufe)."""
-    sl = _try(api.get_sleep_data, d) or {}
+    """Schlaf, HRV, Training Readiness und Trainingsstatus eines Tages (4 API-Aufrufe).
+
+    fx_sleep/fx_hrv/fx_ready/fx_status: True = Aufruf gelungen (auch wenn Garmin keine Daten hat),
+    False = Aufruf gescheitert. R lädt Tage mit False beim nächsten Lauf erneut."""
+    ok_s, sl = _call(api.get_sleep_data, d)
+    sl = sl or {}
     dto = sl.get("dailySleepDTO") or {}
-    hrv = (_try(api.get_hrv_data, d) or {}).get("hrvSummary") or {}
-    rd = _try(api.get_morning_training_readiness, d) or {}
+    ok_h, hrv = _call(api.get_hrv_data, d)
+    hrv = (hrv or {}).get("hrvSummary") or {}
+    ok_r, rd = _call(api.get_morning_training_readiness, d)
+    rd = rd or {}
     if isinstance(rd, list):
         rd = rd[0] if rd else {}
-    ts = _try(api.get_training_status, d) or {}
+    ok_t, ts = _call(api.get_training_status, d)
+    ts = ts or {}
     lts = list(((ts.get("mostRecentTrainingStatus") or {}).get("latestTrainingStatusData") or {}).values())
     lts = lts[0] if lts else {}
     acute = lts.get("acuteTrainingLoadDTO") or {}
     return {
+        "fx_sleep": ok_s, "fx_hrv": ok_h, "fx_ready": ok_r, "fx_status": ok_t,
         # Schlaf (wie bisher)
         "sleep_h": _hours(dto.get("sleepTimeSeconds")),
         "deep_h": _hours(dto.get("deepSleepSeconds")),

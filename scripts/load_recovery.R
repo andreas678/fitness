@@ -105,9 +105,29 @@ derive_commute_hrr <- function(acts, p, default = 0.40, min_n = 5) {
   r <- acts[acts$type_key %in% "cycling" & !is.na(acts$avg_hr), ]
   hrr <- pmin(pmax((r$avg_hr - p$rhr_ref) / (p$hrmax - p$rhr_ref), 0), 1)
   if (length(hrr) < min_n)
-    return(list(value = default, n = length(hrr), lo = NA_real_, hi = NA_real_, source = "Annahme"))
+    return(list(value = default, n = length(hrr), lo = NA_real_, hi = NA_real_, hr = NA_real_, hr_lo = NA_real_,
+                hr_hi = NA_real_, source = "Annahme"))
   list(value = round(median(hrr), 2), n = length(hrr), lo = round(min(hrr), 2), hi = round(max(hrr), 2),
+       hr = median(r$avg_hr), hr_lo = min(r$avg_hr), hr_hi = max(r$avg_hr),   # Puls in bpm: das ist die feste Größe
        source = "abgeleitet")
+}
+
+# Pendel-Intensität mit festem Pendel-Puls: gespeichert wird der Puls in bpm, die HFR wird bei jedem Lauf
+# mit dem aktuellen HFmax/Ruhepuls neu berechnet (ändert sich HFmax, bleibt die Auswertung konsistent).
+# Gespeichert wird nur ein abgeleiteter Wert (save = TRUE); die Annahme 0,40 bleibt ungespeichert, damit
+# später abgeleitet werden kann.
+resolve_commute <- function(ref, acts, p, recalc = FALSE, default = 0.40, min_n = 5) {
+  to_hrr <- function(hr) pmin(pmax((hr - p$rhr_ref) / (p$hrmax - p$rhr_ref), 0), 1)
+  if (!recalc && !is.null(ref$commute_hr) && is.finite(ref$commute_hr)) {
+    num <- function(x) if (is.null(x)) NA_real_ else x
+    return(list(value = round(to_hrr(ref$commute_hr), 2), n = num(ref$commute_n),
+                lo = round(to_hrr(num(ref$commute_hr_lo)), 2), hi = round(to_hrr(num(ref$commute_hr_hi)), 2),
+                hr = ref$commute_hr, hr_lo = num(ref$commute_hr_lo), hr_hi = num(ref$commute_hr_hi),
+                source = "gespeichert", save = FALSE))
+  }
+  d <- derive_commute_hrr(acts, p, default, min_n)
+  d$save <- d$source == "abgeleitet"
+  d
 }
 
 session_load <- function(acts, p, commute_hrr = 0.40, zones = NULL) {

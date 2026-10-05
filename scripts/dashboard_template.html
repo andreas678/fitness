@@ -365,7 +365,7 @@ function renderLoadNote(d) {
   const nUnk = d.filter(r => r.load_unknown).length, nOff = d.filter(r => r.no_wear).length;
   document.getElementById("load-note").textContent =
     `Geschätzter Anteil der Last im Zeitraum: ${tot ? nf(est / tot * 100) : "–"} %. Pendelfahrten ohne Puls zählen mit ${nf(META.commute_hrr * 100)} % der Herzfrequenzreserve (` +
-    (C.source === "abgeleitet" ? `Median aus ${C.n} gemessenen Fahrten, Spannweite ${nf(C.lo * 100)}–${nf(C.hi * 100)} %` : "Annahme") + `).` +
+    (C.source !== "Annahme" ? `Median aus ${C.n} gemessenen Fahrten (Pendel-Puls ${nf(C.hr)} bpm${C.source === "gespeichert" ? ", fest gespeichert" : ""}), Spannweite ${nf(C.lo * 100)}–${nf(C.hi * 100)} %` : "Annahme") + `).` +
     (nUnk ? ` ${nUnk} Tage mit unbekannter Last (Uhr getragen, nichts aufgezeichnet).` : "") +
     (nOff ? ` ${nOff} Tage ohne getragene Uhr.` : "");
 }

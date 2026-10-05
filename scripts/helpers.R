@@ -125,3 +125,83 @@ apply_annotations <- function(daily, ann) {
   }
   daily
 }
+
+# ---- Cache-Integrität: welche Tage nachladen? -----------------------------------------------------
+# Nachgeladen werden: fehlende Tage (kein Schrittwert und kein gelungener Statistik-Aufruf), heute und gestern (unvollständig), Tage mit
+# gescheitertem Teilaufruf (fx_* == FALSE) und bei Alt-Caches ohne fx-Spalten junge Tage ohne Schlafdaten.
+# "Keine Daten" (Aufruf gelungen, Garmin liefert nichts) wird NICHT erneut geholt.
+FX_COLS <- c("fx_stats", "fx_sleep", "fx_hrv", "fx_ready", "fx_status")
+
+days_to_fetch <- function(old, today = Sys.Date(), days_back = 180, legacy_days = 14) {
+  want <- seq(today - days_back, today, by = "day")
+  if (is.null(old)) return(want)
+  fx   <- intersect(FX_COLS, names(old))
+  # erledigt: Schrittwert vorhanden oder Statistik-Aufruf gelungen (dann hat Garmin für den Tag nichts, z. B. Uhr nicht getragen)
+  stats_ok <- if ("fx_stats" %in% fx) old$fx_stats %in% TRUE else rep(FALSE, nrow(old))
+  have <- old$date[!is.na(old$steps) | stats_ok]
+  failed <- if (length(fx)) old$date[Reduce(`|`, lapply(fx, function(k) !is.na(old[[k]]) & !old[[k]]))] else as.Date(character())
+  legacy_row <- if (length(fx)) Reduce(`&`, lapply(fx, function(k) is.na(old[[k]]))) else rep(TRUE, nrow(old))
+  sl <- if ("sleep_h" %in% names(old)) old$sleep_h else rep(NA_real_, nrow(old))
+  legacy <- old$date[legacy_row & is.na(sl) & old$date >= today - legacy_days]
+  want[!(want %in% have) | want >= today - 1 | want %in% failed | want %in% legacy]
+}
+
+# ---- Plausibilitätsprüfung (Warnung, kein Abbruch) --------------------------------------------------
+# Rückgabe: Tabelle check / n / example. n = 0: unauffällig.
+check_row <- function(check, bad, label) {
+  tibble(check = check, n = sum(bad, na.rm = TRUE),
+         example = if (any(bad, na.rm = TRUE)) paste(head(label[which(bad)], 3), collapse = ", ") else "")
+}
+
+validate_daily <- function(d) {
+  col <- function(nm) if (nm %in% names(d)) d[[nm]] else rep(NA_real_, nrow(d))
+  dt  <- as.Date(d$date); u <- sort(unique(dt)); gap <- c(FALSE, diff(u) != 1)
+  bind_rows(
+    tibble(check = "Datumslücken", n = sum(gap), example = if (any(gap)) paste(head(as.character(u[gap]), 3), collapse = ", ") else ""),
+    check_row("doppelte Tage", duplicated(dt), as.character(dt)),
+    check_row("Schritte < 0", col("steps") < 0, as.character(dt)),
+    check_row("Ruhepuls außerhalb 30-100", col("resting_hr") < 30 | col("resting_hr") > 100, as.character(dt)),
+    check_row("Schlaf außerhalb 0-16 h", col("sleep_h") < 0 | col("sleep_h") > 16, as.character(dt)))
+}
+
+validate_acts <- function(a) {
+  col <- function(nm) if (nm %in% names(a)) a[[nm]] else rep(NA_real_, nrow(a))
+  id  <- as.character(col("activity_id")); st <- col("start")
+  lab <- ifelse(is.na(st), id, format(st, "%Y-%m-%d %H:%M"))
+  bind_rows(
+    check_row("doppelte activity_id", duplicated(id), id),
+    check_row("Start fehlt", is.na(st), id),
+    check_row("Dauer <= 0 oder > 24 h", col("duration_min") <= 0 | col("duration_min") > 1440, lab),
+    check_row("Puls außerhalb 30-230", col("avg_hr") < 30 | col("avg_hr") > 230 | col("max_hr") < 30 | col("max_hr") > 230, lab),
+    check_row("max_hr < avg_hr", col("max_hr") < col("avg_hr"), lab),
+    check_row("Strecke < 0", col("distance_km") < 0, lab))
+}
+
+report_validation <- function(v, label) {
+  bad <- v[v$n > 0, ]
+  if (nrow(bad) == 0) { message(sprintf("Plausibilitätsprüfung %s: keine Auffälligkeiten.", label)); return(invisible(v)) }
+  for (i in seq_len(nrow(bad)))
+    message(sprintf("Plausibilitätsprüfung %s: %s: %d%s", label, bad$check[i], bad$n[i],
+                    if (nzchar(bad$example[i])) sprintf(" (z. B. %s)", bad$example[i]) else ""))
+  invisible(v)
+}
+
+# ---- Feste Referenzwerte (data/profile.json, git-ignoriert) -----------------------------------------
+# Ruhepuls-Referenz und Pendel-Puls werden einmal bestimmt und gespeichert, damit sich die Belastung
+# historischer Einheiten nicht mit jedem Lauf (gleitendes Datenfenster) verschiebt.
+# Neu berechnen: Rscript scripts/build_dashboard.R --recalc-profile
+read_ref <- function(path = here::here("data", "profile.json")) {
+  if (!file.exists(path)) return(list())
+  tryCatch(jsonlite::read_json(path, simplifyVector = TRUE), error = function(e) list())
+}
+write_ref <- function(ref, path = here::here("data", "profile.json")) {
+  jsonlite::write_json(ref, path, auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null")
+}
+
+# Reihenfolge: Umgebungsvariable RHR_REF vor gespeichertem Wert vor Neuberechnung.
+resolve_rhr_ref <- function(ref, candidate, env = NA_real_, recalc = FALSE) {
+  if (is.finite(env) && env > 0) return(list(value = env, source = "RHR_REF (Renviron)", save = FALSE))
+  if (!recalc && !is.null(ref$rhr_ref) && is.finite(ref$rhr_ref))
+    return(list(value = ref$rhr_ref, source = "gespeichert", save = FALSE))
+  list(value = candidate, source = "neu berechnet", save = TRUE)
+}

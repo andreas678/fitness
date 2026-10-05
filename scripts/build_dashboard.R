@@ -20,6 +20,7 @@ suppressPackageStartupMessages({
 source(here("scripts", "helpers.R"))
 source(here("scripts", "load_recovery.R"))
 
+RECALC <- "--recalc-profile" %in% commandArgs(trailingOnly = TRUE)   # feste Referenzwerte neu bestimmen
 RIDE_GAP_MIN <- 30    # wie in garmin_fitness.R
 RIDE_MIN_MIN <- 3
 
@@ -44,11 +45,28 @@ hr_raw     <- read_opt(here("data", "garmin_activity_hr.csv"),   # Spitzenpuls a
                        col_types = cols(activity_id = col_character(), .default = col_double()))
 
 # Profil, Belastung, Erholungs-Signale (siehe load_recovery.R)
-rhr_ref <- median(clean_daily(daily_raw)$resting_hr, na.rm = TRUE)   # ohne Ruhepuls-Artefakte
+report_validation(validate_daily(daily_raw), "Tageswerte")
+report_validation(validate_acts(read_csv(here("data", "garmin_activities.csv"), show_col_types = FALSE,
+                                         col_types = cols(activity_id = col_character(), start = col_datetime(),
+                                                          name = col_character(), type_key = col_character(),
+                                                          .default = col_double()))), "Aktivitäten")
+
+# Feste Referenzwerte (data/profile.json), damit sich die Belastung alter Einheiten nicht mit dem Datenfenster
+# verschiebt: Ruhepuls-Referenz und Pendel-Puls (bpm) werden einmal bestimmt; neu mit --recalc-profile
+ref  <- read_ref()
+rr   <- resolve_rhr_ref(ref, median(clean_daily(daily_raw)$resting_hr, na.rm = TRUE),
+                        env = suppressWarnings(as.numeric(Sys.getenv("RHR_REF"))), recalc = RECALC)
+rhr_ref <- rr$value
 prof    <- athlete_profile(rhr_ref)
-# Pendel-Intensität (Radfahrten ohne Puls) aus den gemessenen Fahrten ableiten, sonst Annahme 0,40
-commute    <- derive_commute_hrr(acts_m, prof, default = 0.40)
+# Pendel-Intensität (Radfahrten ohne Puls) aus den gemessenen Fahrten, sonst Annahme 0,40
+commute     <- resolve_commute(ref, acts_m, prof, recalc = RECALC)
 COMMUTE_HRR <- commute$value
+if (rr$save)      { ref$rhr_ref <- rhr_ref; ref$rhr_ref_date <- as.character(Sys.Date()) }
+if (commute$save) { ref$commute_hr <- commute$hr; ref$commute_hr_lo <- commute$hr_lo; ref$commute_hr_hi <- commute$hr_hi
+                    ref$commute_n <- commute$n; ref$commute_date <- as.character(Sys.Date()) }
+if (rr$save || commute$save) { write_ref(ref); message("Referenzwerte in data/profile.json gespeichert.") }
+message(sprintf("Referenz Ruhepuls: %.0f bpm (%s)%s", rhr_ref, rr$source,
+                if (rr$source == "gespeichert") "; neu bestimmen mit --recalc-profile" else ""))
 acts_s  <- session_load(acts_m, prof, COMMUTE_HRR, zones_raw)
 dl      <- daily_load_recovery(daily_raw, acts_s)
 recov_x <- recovery_data(dl)                   # Folgetag-Werte je HIIT-/Nicht-HIIT-Tag
@@ -99,7 +117,7 @@ meta <- list(
   built = format(Sys.time(), "%d.%m.%Y %H:%M"),
   recovery_design = recov_design,
   ride_gap_min = RIDE_GAP_MIN, ride_min_min = RIDE_MIN_MIN, commute_hrr = COMMUTE_HRR,
-  commute = list(n = commute$n, lo = commute$lo, hi = commute$hi, source = commute$source),
+  commute = list(n = commute$n, lo = commute$lo, hi = commute$hi, hr = commute$hr, source = commute$source),
   min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR,                 # Schwellen aus helpers.R, vom Dashboard mitgenutzt
   sleep_cols = c(SLEEP_COLS, "bed_h", "wake_h"),                # bei ungültiger Nacht ausblendbar
   garmin_zones = if (!is.null(zones_raw) && nrow(zones_raw) > 0)
@@ -139,8 +157,9 @@ for (i in seq_len(nrow(recov)))
   message(sprintf("  %-26s %6.1f [%6.1f; %6.1f]  d = %5.2f  p(Holm) = %s", recov$metric[i], recov$adj_diff[i], recov$ci_lo[i],
                   recov$ci_hi[i], recov$d[i], if (is.na(recov$p_holm[i])) "–" else format(round(recov$p_holm[i], 3), nsmall = 3)))
 message(sprintf("Messwochentage mit HIIT- und Vergleichstagen (je >= 3): %d von 7", sum(recov_design$both)))
-message(sprintf("Pendel-Intensität: HFR %.2f (%s, n = %d gemessene Fahrten%s)", COMMUTE_HRR, commute$source, commute$n,
-                if (commute$source == "abgeleitet") sprintf(", Spannweite %.2f–%.2f", commute$lo, commute$hi) else ""))
+message(sprintf("Pendel-Intensität: HFR %.2f (%s, n = %s gemessene Fahrten%s)", COMMUTE_HRR, commute$source,
+                if (is.na(commute$n)) "?" else as.character(commute$n),
+                if (commute$source != "Annahme" && !is.na(commute$lo)) sprintf(", Spannweite %.2f–%.2f, Pendel-Puls %.0f bpm", commute$lo, commute$hi, commute$hr) else ""))
 sens <- trimp_sensitivity(acts_m, prof, COMMUTE_HRR, zones_raw)
 message("Sensitivität der Gesamt-TRIMP (jeweils eine Annahme variiert):")
 for (i in seq_len(nrow(sens)))

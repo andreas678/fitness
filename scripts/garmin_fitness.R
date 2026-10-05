@@ -155,6 +155,9 @@ fetch_day <- function(api, d) {
   st <- tryCatch(api$get_stats(d), error = function(e) NULL)
   ex <- tryCatch(extra_day(api, d), error = function(e) list())
   ev <- function(k) { v <- ex[[k]]; if (is.null(v)) NA else v }
+  # Erfolgsmarken: TRUE = Aufruf gelungen (auch wenn Garmin keine Daten hat), FALSE = Aufruf gescheitert.
+  # Gescheiterte Tage werden beim nächsten Lauf erneut geholt (days_to_fetch in helpers.R).
+  fx <- function(k) isTRUE(as.logical(ev(k)))
   tibble(
     date          = as.Date(d),
     steps         = num(pick(st, "totalSteps")),
@@ -183,7 +186,9 @@ fetch_day <- function(api, d) {
     ready_score   = num(ev("ready_score")), ready_level = as.character(ev("ready_level")),
     recovery_h    = num(ev("recovery_h")), ts_acute = num(ev("ts_acute")),
     ts_chronic    = num(ev("ts_chronic")), ts_acwr = num(ev("ts_acwr")),
-    ts_status     = as.character(ev("ts_status")), vo2max = num(ev("vo2max"))
+    ts_status     = as.character(ev("ts_status")), vo2max = num(ev("vo2max")),
+    fx_stats = !is.null(st), fx_sleep = fx("fx_sleep"), fx_hrv = fx("fx_hrv"),
+    fx_ready = fx("fx_ready"), fx_status = fx("fx_status")
   )
 }
 
@@ -243,10 +248,10 @@ update_daily <- function(api) {
     message("Daily-Cache hat neue Spalten nicht (HRV, Readiness, Schlafzeiten): lade alles neu.")
     old <- NULL
   }
-  want <- seq(Sys.Date() - DAYS_BACK, Sys.Date(), by = "day")
-  have <- if (is.null(old)) as.Date(character()) else old$date[!is.na(old$steps)]
-  todo <- want[!(want %in% have) | want >= Sys.Date() - 1]
-  message(sprintf("Tageswerte: %d Tage nachladen …", length(todo)))
+  todo <- days_to_fetch(old, Sys.Date(), DAYS_BACK)   # fehlende, heute/gestern, gescheiterte Teilaufrufe
+  n_failed <- if (is.null(old)) 0L else sum(old$date %in% todo & Reduce(`|`, lapply(intersect(FX_COLS, names(old)),
+                                                  function(k) !is.na(old[[k]]) & !old[[k]]), FALSE))
+  message(sprintf("Tageswerte: %d Tage nachladen (davon %d wegen gescheiterter Aufrufe) …", length(todo), n_failed))
 
   rows <- vector("list", length(todo))
   for (i in seq_along(todo)) {
@@ -391,6 +396,8 @@ if (DEMO) {
 }
 
 set_utf8_locale()   # nach dem Python-Start, vor dem Plot-Code
+
+if (!DEMO) { report_validation(validate_daily(daily), "Tageswerte"); report_validation(validate_acts(acts), "Aktivitäten") }
 
 since <- Sys.Date() - PLOT_DAYS
 # clean_daily() (helpers.R): ungültige Nächte und Ruhepuls-Artefakte werden NA, unvollständige Tage
