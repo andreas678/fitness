@@ -85,9 +85,17 @@ activity_group <- function(type) {
 sum_na <- function(x) if (all(is.na(x))) NA_real_ else sum(x, na.rm = TRUE)
 max_na <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
 
+# Radfahrt im engen Sinn: Garmin-Typ "cycling". Hierauf beruhen das Zusammenfassen der Segmente (merge_rides), die
+# Pendel-Schätzung ohne Pulsdaten und die Ableitung der Pendel-Intensität. activity_group() ordnet breiter zu
+# (Regex cycling|biking|ride, also auch indoor_cycling, mountain_biking, road_biking): solche Fahrten zählen als "Rad",
+# werden aber nicht zusammengefasst und nicht als Pendelstrecke geschätzt. E-Bike-Typen (e_bike_fitness, e_bike_mountain)
+# treffen die Regex nicht und landen in anderen Gruppen. Das zu ändern ist hier an einer Stelle möglich;
+# in den echten Daten kommt bisher nur "cycling" vor.
+is_ride_type <- function(type_key) type_key %in% "cycling"
+
 merge_rides <- function(acts, gap_min = RIDE_GAP_MIN, min_min = RIDE_MIN_MIN) {
   acts$segment_ids <- acts$activity_id    # Nicht-Rad-Aktivitäten bestehen aus genau einem Segment
-  is_ride <- acts$type_key %in% "cycling"
+  is_ride <- is_ride_type(acts$type_key)
   rides <- acts[is_ride, ] |>
     arrange(start) |>
     mutate(dur_s   = coalesce(duration_min, 0) * 60,
@@ -147,8 +155,8 @@ flag_daily <- function(daily, min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR, min_
 # rhr_bad. extra_cols = weitere Spalten, die an die Nacht gebunden sind (z. B. "bb_high").
 # Schritte und andere Tagessummen bleiben unverändert (partial ist nur eine Markierung).
 clean_daily <- function(daily, min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR, extra_cols = character(),
-                        today = Sys.Date()) {
-  d <- flag_daily(daily, min_sleep_h, min_rhr, today = today)
+                        today = Sys.Date(), min_steps = MIN_STEPS) {
+  d <- flag_daily(daily, min_sleep_h, min_rhr, min_steps, today = today)
   for (cl in intersect(c(SLEEP_COLS, extra_cols), names(d))) d[[cl]][d$sleep_bad] <- NA
   if ("resting_hr" %in% names(d)) d$resting_hr[d$rhr_bad] <- NA
   d

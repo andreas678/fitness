@@ -57,3 +57,18 @@ test_that("Unvollständige Tage zählen nicht in den ACWR, ihre Last bleibt sich
   expect_equal(tail(high$load_meas, 1), 500)
   expect_true(tail(high$partial, 1))
 })
+
+test_that("clean_daily reicht min_steps an flag_daily durch", {
+  d <- tibble(date = as.Date("2026-06-01") + 0:2, steps = c(100, 400, 600), sleep_h = NA_real_, resting_hr = 54)
+  today <- as.Date("2026-10-05")
+  expect_equal(clean_daily(d, today = today)$partial, c(TRUE, TRUE, FALSE))            # Standard: unter 500 Schritte ohne Schlafdaten
+  expect_equal(clean_daily(d, min_steps = 300, today = today)$partial, c(TRUE, FALSE, FALSE))
+  expect_equal(clean_daily(d, min_steps = 700, today = today)$partial, c(TRUE, TRUE, TRUE))
+})
+
+test_that("is_ride_type: nur der Garmin-Typ cycling gilt als Radfahrt im engen Sinn", {
+  expect_equal(is_ride_type(c("cycling", "hiit", "indoor_cycling", NA)), c(TRUE, FALSE, FALSE, FALSE))
+  # activity_group ordnet breiter zu: solche Fahrten zählen als "Rad", werden aber nicht zusammengefasst
+  expect_equal(activity_group(c("cycling", "indoor_cycling", "mountain_biking")), rep("Rad", 3))
+  expect_false(any(activity_group(c("e_bike_fitness", "e_bike_mountain")) == "Rad"))   # E-Bike-Typen treffen die Regex nicht
+})
