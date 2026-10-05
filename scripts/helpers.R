@@ -287,6 +287,25 @@ resolve_rhr_ref <- function(ref, candidate, env = NA_real_, recalc = FALSE) {
   list(value = candidate, source = "neu berechnet", save = TRUE)
 }
 
+# ---- Hilfen für die Inferenz-Module (HIIT-Erholung, Temperatur, Wochentrends) --------------------
+# Schätzung eines Koeffizienten mit Newey-West-Standardfehler (robust gegen Autokorrelation der Tageswerte; Fenster `lag`
+# in Tagen), 95-%-Intervall aus der t-Verteilung mit den Residual-Freiheitsgraden und zweiseitigem p-Wert.
+# Liefert est, se, df, lo, hi, p auf der Skala des Modells; Umrechnung (Faktor, Rücktransformation) macht der Aufrufer.
+nw_effect <- function(fit, term, lag) {
+  est <- unname(stats::coef(fit)[term])
+  se  <- sqrt(sandwich::NeweyWest(fit, lag = lag, prewhite = FALSE, adjust = TRUE)[term, term])
+  df  <- fit$df.residual; tc <- stats::qt(0.975, df)
+  list(est = est, se = se, df = df, lo = est - tc * se, hi = est + tc * se, p = 2 * stats::pt(-abs(est / se), df))
+}
+# Kennwerte, die multiplikativ schwanken (HRV), werden auf der ln-Skala gerechnet: nur positive Werte, sonst NA.
+# Effekte auf der ln-Skala werden als Prozent zurückgerechnet.
+ln_or_na   <- function(x) {
+  out <- rep(NA_real_, length(x)); ok <- !is.na(x) & x > 0
+  out[ok] <- log(x[ok])                              # nur die positiven Werte: kein "NaNs produced" bei 0 oder negativen Werten
+  out
+}
+pct_from_ln <- function(z) 100 * (exp(z) - 1)
+
 # ---- Gewichtstrend ----------------------------------------------------------------------------------
 # Wiegungen sind selten (hier etwa alle 10 Tage) und streuen von Tag zu Tag um 1 kg und mehr
 # (Flüssigkeit, Tageszeit). Deshalb kein Einzelwert-Vergleich, sondern ein lokaler Trend (loess,
@@ -340,7 +359,7 @@ trend_fit <- function(wk, origin, is_log, min_weeks, at = wk$week) {
   if (nrow(wk) < min_weeks) return(out)
   f <- stats::lm(m ~ x, data = data.frame(m = wk$m, x = as.numeric(wk$week - origin) / 7))
   ci <- stats::confint(f)["x", ]; b <- unname(coef(f)["x"])
-  tf <- if (is_log) function(z) 100 * (exp(z) - 1) else identity
+  tf <- if (is_log) pct_from_ln else identity
   bk <- if (is_log) exp else identity
   out[c("slope", "lo", "hi")] <- list(tf(b), tf(unname(ci[1])), tf(unname(ci[2])))
   out$verdict <- if (ci[1] > 0) "steigend" else if (ci[2] < 0) "fallend" else "kein klarer Trend"
@@ -382,7 +401,7 @@ adaptation_trends <- function(daily, weeks = 12, min_days = 4, min_weeks = 6, ma
     if (!m %in% names(d)) next
     v <- d[[m]]; v[d$partial] <- NA
     is_log <- TREND_METRICS$log[i]
-    if (is_log) v <- ifelse(!is.na(v) & v > 0, log(v), NA_real_)
+    if (is_log) v <- ln_or_na(v)
     wk_all <- weekly_means(d, v, min_days, max_ann_share)
     wk <- wk_all[wk_all$week >= first_wk, ]
     a <- trend_fit(wk_all, if (nrow(wk_all)) min(wk_all$week) else first_wk, is_log, min_weeks, at = wk$week)
