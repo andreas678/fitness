@@ -4,7 +4,7 @@ Quelle: Flowchart-Subagent (nur gelesen). Nicht geprüft: Inhalt der (git-ignori
 
 ## Funktionen in `scripts/helpers.R`
 - `activity_group` (`:7-17`): Regex-Reihenfolge Rad, Laufen, Gym/HIIT, Gehen/Wandern, Segeln/Wasser, sonst „Sonstiges“.
-- `merge_rides` (`:25-51`): führt nur `type_key == "cycling"` zusammen (Lücke über 30 min oder anderer Kalendertag = neue Fahrt). Fahrten unter 3 min fallen weg. `e_bike` und `indoor_cycling` werden nicht zusammengeführt, `activity_group` ordnet sie aber „Rad“ zu.
+- `merge_rides` (`:25-51`): führt nur `type_key == "cycling"` zusammen (Lücke über 30 min oder anderer Kalendertag = neue Fahrt). Fahrten unter 3 min fallen weg. `indoor_cycling` und `mountain_biking` werden nicht zusammengeführt, `activity_group` ordnet sie aber „Rad“ zu. E-Bike-Typen treffen die Regex nicht: `e_bike_fitness` landet in „Gym / HIIT“ (Regex `fitness`), `e_bike_mountain` in „Sonstiges“. (Berichtigung: Der erste Entwurf nannte E-Bikes fälschlich ebenfalls „Rad“.)
 - Schwellen `MIN_SLEEP_H = 5`, `MIN_RHR = 45`, `MIN_STEPS = 500` (`:56-58`), `SLEEP_COLS` (`:61-63`).
 - `flag_daily` (`:71-81`) setzt `sleep_bad`, `rhr_bad`, `partial`, ändert aber keine Werte. `clean_daily` (`:86-92`) setzt Schlafspalten bei `sleep_bad` und Ruhepuls bei `rhr_bad` auf `NA`. `clean_daily` reicht `min_steps` nicht an `flag_daily` durch (immer Standardwert).
 - Annotationen: `read_annotations` (`:101-115`, bricht bei fehlerhaftem Schema oder Datum mit `stop()` ab), `apply_annotations` (`:118-127`).

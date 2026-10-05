@@ -118,7 +118,7 @@ Anti-Pattern-Wächter:
 
 ```
 /make-plan Räume in einem Durchgang vier kleine Duplikate auf.
-1. Rad-Erkennung: Eine Funktion is_ride(type_key) statt exaktem "cycling" (helpers.R:27 merge_rides, load_recovery.R:105 und :137, garmin_fitness.R:362 entfällt mit S3) und der Regex cycling|biking|ride (helpers.R:10 activity_group). Zur Entscheidung vorlegen: Sollen e_bike und indoor_cycling zusammengeführt und als Pendelstrecke geschätzt werden? Heute gelten sie als "Rad", werden aber nicht zusammengeführt.
+1. Rad-Erkennung: Eine Funktion is_ride(type_key) statt exaktem "cycling" (helpers.R:27 merge_rides, load_recovery.R:105 und :137, garmin_fitness.R:362 entfällt mit S3) und der Regex cycling|biking|ride (helpers.R:10 activity_group). Zur Entscheidung vorlegen: Sollen indoor_cycling und mountain_biking zusammengeführt und als Pendelstrecke geschätzt werden? Heute gelten sie als "Rad" (Regex), werden aber nicht zusammengeführt. E-Bike-Typen treffen die Regex nicht (e_bike_fitness landet in "Gym / HIIT" durch die Regex fitness, e_bike_mountain in "Sonstiges"); ob sie als Rad gelten sollen, wäre eine eigene Entscheidung.
 2. Herzfrequenzreserve und Tanaka: hrr_frac(x, prof) ersetzt die Inline-Kopien load_recovery.R:74, :106, :120, :136-138; tanaka_hrmax(age) ersetzt :23 und :29; die Zonengrenzen c(.5,.6,.7,.8,.9) stehen einmal (:33-34, :70-73, :140).
 3. JS: fmtP einmal (dashboard_template.html:554 und :593), Farben als PALETTE statt Hex-Literalen (z. B. #D55E00 an :170, :363, :387, :412, :456, :543), gemeinsame Legenden- und Achsenoptionen (:345, :358, :370, :380, :390, :413, :430, :453; noLegend :383), sg/sgn einmal (:324, :555, :573, :595).
 4. clean_daily (helpers.R:86-92) soll min_steps an flag_daily durchreichen.

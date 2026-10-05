@@ -49,7 +49,7 @@ Das Projekt ist klein (rund 2.000 Zeilen R/Python, 764 Zeilen Template). Der Vor
 
 ## S6 – Kleinkram, gemeinsam in einem Durchgang
 
-- **Rad-Erkennung:** eine Funktion `is_ride(type_key)` statt exaktem `"cycling"` (`helpers.R:27`, `load_recovery.R:105`, `:137`) und Regex `cycling|biking|ride` (`helpers.R:10`). Entscheidung nötig: Sollen `e_bike` und `indoor_cycling` zusammengeführt und als Pendelstrecke geschätzt werden? Heute gelten sie als „Rad“, werden aber nicht zusammengeführt.
+- **Rad-Erkennung:** eine Funktion `is_ride(type_key)` statt exaktem `"cycling"` (`helpers.R:27`, `load_recovery.R:105`, `:137`) und Regex `cycling|biking|ride` (`helpers.R:10`). Entscheidung nötig: Sollen `indoor_cycling` und `mountain_biking` zusammengeführt und als Pendelstrecke geschätzt werden? Heute gelten sie als „Rad“ (Regex), werden aber nicht zusammengeführt. E-Bike-Typen treffen die Regex nicht: `e_bike_fitness` landet in „Gym / HIIT“ (Regex `fitness`), `e_bike_mountain` in „Sonstiges“. Ob E-Bikes als Rad gelten sollen, wäre eine eigene Entscheidung. Umgesetzt als `is_ride_type()` mit unverändertem Verhalten in S6 (#7).
 - **Herzfrequenzreserve und Tanaka:** `hrr_frac()` und `tanaka_hrmax()` ersetzen vier Inline-Kopien (`load_recovery.R:74`, `:106`, `:120`, `:136-138`) und zwei Tanaka-Kopien (`:23`, `:29`). Die Zonengrenzen stehen einmal (`:33-34`).
 - **JS:** `fmtP` einmal (`dashboard_template.html:554`, `:593`), Farben als Konstanten (`PALETTE`), Legenden-/Achsenoptionen als gemeinsame Objekte (`:345` …). Der Block `<dateRange>` (`:216-240`) und `<weightChange>` bleiben unverändert, weil die Tests ihn per Regex lesen.
 - **Capability-Verlust:** keiner.
