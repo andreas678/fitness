@@ -10,14 +10,14 @@ with_env <- function(vars, code) {
 today <- as.Date("2026-10-05")
 
 test_that("athlete_profile: HRMAX aus der Umgebung heißt 'eingestellt', Plausibilitätsgrenze aus Tanaka + 30", {
-  p <- with_env(c(BIRTHDAY = "26-07-1974", HRMAX = "182", GENDER = "male"), athlete_profile(54, today))
+  p <- with_env(c(BIRTHDAY = "01-01-1974", HRMAX = "182", GENDER = "male"), athlete_profile(54, today))
   expect_equal(p$age, 52); expect_equal(p$hrmax, 182)
   expect_equal(p$hrmax_source, "eingestellt via HRMAX")
   expect_equal(p$hr_ceiling, round(208 - 0.7 * 52) + 30)      # 202
 })
 
 test_that("athlete_profile: ohne HRMAX wird nach Tanaka geschätzt", {
-  p <- with_env(c(BIRTHDAY = "26-07-1974", HRMAX = "", GENDER = "male"), athlete_profile(54, today))
+  p <- with_env(c(BIRTHDAY = "01-01-1974", HRMAX = "", GENDER = "male"), athlete_profile(54, today))
   expect_equal(p$hrmax, round(208 - 0.7 * 52)); expect_equal(p$hrmax_source, "geschätzt (Tanaka)")
 })
 
