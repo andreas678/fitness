@@ -199,14 +199,19 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
 }
 
 # ---- Erholung nach HIIT: Vergleich der Folgetag-Werte -------------------------------------
-perm_p <- function(x, y, B = 10000) {
-  obs <- mean(x) - mean(y); all <- c(x, y); n <- length(x)
-  set.seed(42)
-  hits <- sum(replicate(B, { s <- sample(all); abs(mean(s[1:n]) - mean(s[-(1:n)])) >= abs(obs) }))
-  (hits + 1) / (B + 1)
-}
+# Aufbau: recovery_data() (eine Zeile je HIIT-/Nicht-HIIT-Tag mit den Werten des Folgetags),
+# recovery_model() (adjustierter Effekt je Kennwert) und recovery_design() (wie gut sind HIIT-
+# und Vergleichstage über die Messwochentage verteilt?).
+# Hinweis zur Methode: HIIT liegt auf wenigen Wochentagen, und der Wochentag der Messung beeinflusst
+# die Werte (z. B. Wochenende). Ein roher Gruppenvergleich ist deshalb konfundiert; das Modell
+# adjustiert für den Wochentag. Aussage bleibt ein Zusammenhang, kein Kausalbeweis.
+RECOVERY_METRICS <- tibble(
+  col = c("sleep_score_n", "deep_h_n", "bb_high_n", "resting_hr_n", "hrv_n", "sleep_hr_n", "ready_n"),
+  metric = c("Schlaf-Score", "Tiefschlaf (h)", "Body-Battery-Höchstwert", "Ruhepuls (bpm)",
+             "HRV nachts (ms)", "Puls im Schlaf (bpm)", "Training Readiness"),
+  independent = c(rep(TRUE, 6), FALSE))   # Readiness enthält Garmins Last und Erholungszeit: nicht unabhängig
 
-recovery_summary <- function(d) {
+recovery_data <- function(d) {
   d  <- flag_daily(d)
   cl <- clean_daily(d, extra_cols = c("bb_high", "ready_score"))
   sleep_ok <- !is.na(d$sleep_h) & !d$sleep_bad       # Nacht vorhanden und gültig
@@ -214,17 +219,60 @@ recovery_summary <- function(d) {
   ok  <- function(col) if (has(col)) ifelse(sleep_ok, cl[[col]], NA) else rep(NA_real_, nrow(d))
   nx <- tibble(date = d$date - 1,
                sleep_score_n = ok("sleep_score"), deep_h_n = ok("deep_h"), bb_high_n = ok("bb_high"),
-               resting_hr_n = cl$resting_hr,
+               resting_hr_n = if (has("resting_hr")) cl$resting_hr else rep(NA_real_, nrow(d)),
                hrv_n = ok("hrv_night"), sleep_hr_n = ok("sleep_hr"), ready_n = ok("ready_score"))
-  x <- d |> filter(!unrecorded) |> select(date, hiit, te_max) |> inner_join(nx, by = "date")
-  mets <- c(sleep_score_n = "Schlaf-Score", deep_h_n = "Tiefschlaf (h)",
-            bb_high_n = "Body-Battery-Höchstwert", resting_hr_n = "Ruhepuls (bpm)",
-            hrv_n = "HRV nachts (ms)", sleep_hr_n = "Puls im Schlaf (bpm)",
-            ready_n = "Training Readiness")
-  bind_rows(lapply(names(mets), function(m) {
-    a <- x[[m]][x$hiit]; b <- x[[m]][!x$hiit]; a <- a[!is.na(a)]; b <- b[!is.na(b)]
-    if (length(a) < 5 || length(b) < 5) return(NULL)
-    tibble(metric = mets[[m]], hiit = mean(a), other = mean(b), diff = mean(a) - mean(b),
-           p = perm_p(a, b), n_hiit = length(a), n_other = length(b))
-  }))
+  d |> filter(!unrecorded) |> select(date, hiit) |> inner_join(nx, by = "date") |> arrange(date) |>
+    mutate(wd = factor(format(date + 1, "%u"), levels = as.character(1:7)))   # Wochentag der Messung (Mo = 1)
+}
+
+# Schätzt je Kennwert: Mittel nach HIIT/sonst, roher Unterschied, wochentag-adjustierter Unterschied mit
+# 95-%-Konfidenzintervall (Newey-West, robust gegen Autokorrelation der Tageswerte), standardisierte
+# Effektgröße d (adjustierter Unterschied / gepoolte Standardabweichung der Gruppen) und p-Wert, Holm-
+# korrigiert über die unabhängigen Kennwerte. r_*: dieselbe Schätzung nur für Messwochentage, an denen
+# HIIT- und Vergleichstage vorkommen (Sensitivität).
+# Näherung: Lücken im Kalender (ausgeschlossene Tage, fehlende Werte) bleiben unberücksichtigt, die
+# Beobachtungen gelten für die Autokorrelation als aufeinanderfolgend.
+recovery_model <- function(x, lag = 3, min_n = 5) {
+  both_days <- recovery_design(x)$wd[recovery_design(x)$both]
+  fit <- function(dat, m) {
+    dat$y <- dat[[m]]; dat <- dat[!is.na(dat$y), ]
+    a <- dat$y[dat$hiit]; b <- dat$y[!dat$hiit]
+    if (length(a) < min_n || length(b) < min_n || sd(dat$y) == 0) return(NULL)   # konstanter Kennwert: kein Effekt schätzbar
+    multi <- nlevels(droplevels(dat$wd)) > 1
+    f <- if (multi) lm(y ~ hiit + droplevels(wd), data = dat) else lm(y ~ hiit, data = dat)
+    est <- coef(f)["hiitTRUE"]
+    if (is.na(est)) return(NULL)
+    se <- sqrt(sandwich::NeweyWest(f, lag = lag, prewhite = FALSE, adjust = TRUE)["hiitTRUE", "hiitTRUE"])
+    df <- f$df.residual; tc <- qt(0.975, df)
+    sp <- sqrt(((length(a) - 1) * var(a) + (length(b) - 1) * var(b)) / (length(a) + length(b) - 2))
+    list(a = a, b = b, est = unname(est), lo = unname(est - tc * se), hi = unname(est + tc * se),
+         p = unname(2 * pt(-abs(est / se), df)), d = unname(est / sp))
+  }
+  rows <- lapply(seq_len(nrow(RECOVERY_METRICS)), function(i) {
+    m <- RECOVERY_METRICS$col[i]
+    full <- fit(x, m)
+    if (is.null(full)) return(NULL)
+    rest <- fit(x[x$wd %in% both_days, ], m)
+    tibble(metric = RECOVERY_METRICS$metric[i], independent = RECOVERY_METRICS$independent[i],
+           hiit = mean(full$a), other = mean(full$b), diff = mean(full$a) - mean(full$b),
+           adj_diff = full$est, ci_lo = full$lo, ci_hi = full$hi, d = full$d, p = full$p,
+           n_hiit = length(full$a), n_other = length(full$b),
+           r_diff = if (is.null(rest)) NA_real_ else rest$est,
+           r_lo   = if (is.null(rest)) NA_real_ else rest$lo,
+           r_hi   = if (is.null(rest)) NA_real_ else rest$hi)
+  })
+  out <- bind_rows(rows)
+  if (is.null(out) || nrow(out) == 0) return(out)
+  out$p_holm <- NA_real_
+  out$p_holm[out$independent] <- p.adjust(out$p[out$independent], method = "holm")
+  out
+}
+
+# Verteilung der Messtage: je Wochentag der Messung Anzahl HIIT-Folgetage und Vergleichstage.
+# both = TRUE, wenn beide Gruppen mindestens min_each-mal vorkommen (nur dort trägt die Adjustierung).
+recovery_design <- function(x, min_each = 3) {
+  tibble(wd = 1:7) |>
+    mutate(n_hiit  = vapply(wd, function(w) sum(x$hiit & as.integer(as.character(x$wd)) == w), numeric(1)),
+           n_other = vapply(wd, function(w) sum(!x$hiit & as.integer(as.character(x$wd)) == w), numeric(1)),
+           both    = n_hiit >= min_each & n_other >= min_each)
 }

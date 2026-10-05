@@ -56,6 +56,7 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 h2.sect { font-size: 16px; font-weight: 600; margin: 8px 2px var(--gap); }
 .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
 .note.warn { color: var(--bad); }
+tr.dep td { font-style: italic; color: var(--muted); }
 table.mini td, table.mini th { padding: 7px 8px; cursor: default; position: static; }
 footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
 @media (max-width: 768px) {
@@ -389,14 +390,25 @@ function updateLoadCharts(d, L) {
   setData("c-flags", L, [d.map(r => r.flags)]);
 }
 function renderRecovery() {
-  const fmtP = p => p < 0.001 ? "&lt; 0,001" : nf(p, 3);
-  const dec = m => m.includes("Tiefschlaf") ? 2 : (m.includes("Ruhepuls") ? 1 : 0);
-  const rows = RECOVERY.map(r => `<tr><td>${r.metric}</td><td class="num">${nf(r.hiit, dec(r.metric))}</td><td class="num">${nf(r.other, dec(r.metric))}</td>` +
-    `<td class="num">${r.diff > 0 ? "+" : ""}${nf(r.diff, dec(r.metric))}</td><td class="num">${fmtP(r.p)}</td></tr>`).join("");
+  const fmtP = p => p == null ? "–" : p < 0.001 ? "&lt; 0,001" : nf(p, 3);
+  const dec = m => m.includes("Tiefschlaf") ? 2 : (m.includes("puls") || m.includes("Puls") ? 1 : 0);
+  const sg = (v, d) => (v > 0 ? "+" : "") + nf(v, d);
+  const ci = (lo, hi, d) => `<small>[${nf(lo, d)}; ${nf(hi, d)}]</small>`;
+  const WD = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"], D = META.recovery_design || [];
+  const both = D.filter(r => r.both).map(r => WD[r.wd - 1]);
+  const rows = RECOVERY.map(r => { const d = dec(r.metric), da = Math.max(d, 1);   // adjustierte Werte mit mind. 1 Dezimale
+    return `<tr${r.independent ? "" : ' class="dep"'}><td>${r.metric}${r.independent ? "" : "*"}</td><td class="num">${nf(r.hiit, d)}</td><td class="num">${nf(r.other, d)}</td>` +
+      `<td class="num">${sg(r.diff, d)}</td><td class="num">${sg(r.adj_diff, da)} ${ci(r.ci_lo, r.ci_hi, da)}</td><td class="num">${nf(r.d, 2)}</td><td class="num">${fmtP(r.p_holm)}</td></tr>`; }).join("");
+  const restricted = RECOVERY.filter(r => r.independent && r.r_diff != null).map(r => { const d = Math.max(dec(r.metric), 1);
+    return `<tr><td>${r.metric}</td><td class="num">${sg(r.r_diff, d)} ${ci(r.r_lo, r.r_hi, d)}</td></tr>`; }).join("");
+  const design = D.map(r => `${WD[r.wd - 1]} ${r.n_hiit}/${r.n_other}`).join(" · ");
   document.getElementById("recovery-card").innerHTML = `<h3>Erholung nach HIIT-Tagen</h3>
-    <div class="sub">Werte am Morgen nach einem HIIT-Tag im Vergleich zu allen anderen Tagen (gesamte Datenbasis)</div>
-    <table class="mini"><thead><tr><th>Kennwert</th><th>Nach HIIT</th><th>Sonst</th><th>Diff.</th><th>p</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="note">p: Permutationstest. Ein Zusammenhang, kein Beweis: HIIT liegt meist am frühen Abend und oft auf Montagen; ${RECOVERY[0].n_hiit} HIIT- gegen ${RECOVERY[0].n_other} andere Tage. Zeiträume ohne Aufzeichnung und Nächte unter ${MIN_SLEEP_H} h sind ausgeschlossen. Die Training Readiness enthält Garmins eigene Last und Erholungszeit und ist daher nicht unabhängig vom Training.</div>`;
+    <div class="sub">Werte am Morgen nach einem HIIT-Tag im Vergleich zu den übrigen Tagen, adjustiert für den Wochentag der Messung (gesamte Datenbasis)</div>
+    <table class="mini"><thead><tr><th>Kennwert</th><th>Nach HIIT</th><th>Sonst</th><th>Diff. roh</th><th>Diff. adjustiert [95 %-KI]</th><th>d</th><th>p (Holm)</th></tr></thead><tbody>${rows}</tbody></table>
+    ${both.length ? `<details class="note"><summary>Sensitivität: nur Messtage mit Vergleichsgruppe (${both.join(", ")})</summary><table class="mini"><thead><tr><th>Kennwert</th><th>Diff. adjustiert [95 %-KI]</th></tr></thead><tbody>${restricted}</tbody></table></details>` : ""}
+    <div class="note ${both.length < 3 ? "warn" : ""}">Messtage (HIIT-Folgetage / andere): ${design}. Nur ${both.length} von 7 Wochentagen haben beide Gruppen (je mindestens 3 Tage); darauf stützt sich die Adjustierung.</div>
+    <div class="note">Ein roher Vergleich wäre verzerrt, weil HIIT auf wenigen Wochentagen liegt und der Wochentag die Werte beeinflusst (z. B. Wochenende). Diff. adjustiert: Unterschied bei gleichem Wochentag, Konfidenzintervall mit Newey-West-Standardfehlern (robust gegen Autokorrelation der Tageswerte), p nach Holm über die ${RECOVERY.filter(r => r.independent).length} unabhängigen Kennwerte, d = standardisierte Effektgröße. Ein Zusammenhang, kein Beweis. ${RECOVERY[0].n_hiit} HIIT- gegen ${RECOVERY[0].n_other} andere Tage; Zeiträume ohne Aufzeichnung und Nächte unter ${MIN_SLEEP_H} h sind ausgeschlossen.</div>
+    <div class="note">* Die Training Readiness enthält Garmins eigene Last und Erholungszeit. Sie ist nicht unabhängig vom Training und wird nicht auf Signifikanz bewertet.</div>`;
 }
 function renderZones() {
   const P = META.profile, G = META.garmin_zones, { from, to } = range();

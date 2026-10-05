@@ -49,7 +49,9 @@ commute    <- derive_commute_hrr(acts_m, prof, default = 0.40)
 COMMUTE_HRR <- commute$value
 acts_s  <- session_load(acts_m, prof, COMMUTE_HRR, zones_raw)
 dl      <- daily_load_recovery(daily_raw, acts_s)
-recov   <- recovery_summary(dl)
+recov_x <- recovery_data(dl)                   # Folgetag-Werte je HIIT-/Nicht-HIIT-Tag
+recov   <- recovery_model(recov_x)             # wochentag-adjustiert, Newey-West (Paket sandwich)
+recov_design <- recovery_design(recov_x)       # Verteilung der Messtage über die Wochentage
 
 to_clock_h <- function(x, shift_night = FALSE) {      # "2026-10-01 22:44" -> 22.73 (nach Mitternacht +24)
   t <- as.POSIXct(x, tz = "UTC", format = "%Y-%m-%d %H:%M")
@@ -92,6 +94,7 @@ weights <- if (!is.null(weight_raw)) weight_raw |>
 hr_sessions <- acts_s |> filter(!is.na(max_hr))
 meta <- list(
   built = format(Sys.time(), "%d.%m.%Y %H:%M"),
+  recovery_design = recov_design,
   ride_gap_min = RIDE_GAP_MIN, ride_min_min = RIDE_MIN_MIN, commute_hrr = COMMUTE_HRR,
   commute = list(n = commute$n, lo = commute$lo, hi = commute$hi, source = commute$source),
   min_sleep_h = MIN_SLEEP_H, min_rhr = MIN_RHR,                 # Schwellen aus helpers.R, vom Dashboard mitgenutzt
@@ -127,6 +130,11 @@ writeLines(html, out, useBytes = TRUE)
 last <- tail(dl, 14)
 message(sprintf("Profil: %d Jahre, HFmax %d bpm (%s), Ruhe-HF-Referenz %d bpm", prof$age,
                 prof$hrmax, prof$hrmax_source, prof$rhr_ref))
+message("Erholung nach HIIT (adjustiert für Messwochentag, 95-%-KI, p nach Holm):")
+for (i in seq_len(nrow(recov)))
+  message(sprintf("  %-26s %6.1f [%6.1f; %6.1f]  d = %5.2f  p(Holm) = %s", recov$metric[i], recov$adj_diff[i], recov$ci_lo[i],
+                  recov$ci_hi[i], recov$d[i], if (is.na(recov$p_holm[i])) "–" else format(round(recov$p_holm[i], 3), nsmall = 3)))
+message(sprintf("Messwochentage mit HIIT- und Vergleichstagen (je >= 3): %d von 7", sum(recov_design$both)))
 message(sprintf("Pendel-Intensität: HFR %.2f (%s, n = %d gemessene Fahrten%s)", COMMUTE_HRR, commute$source, commute$n,
                 if (commute$source == "abgeleitet") sprintf(", Spannweite %.2f–%.2f", commute$lo, commute$hi) else ""))
 sens <- trimp_sensitivity(acts_m, prof, COMMUTE_HRR, zones_raw)
