@@ -40,17 +40,19 @@ athlete_profile <- function(rhr_ref, today = Sys.Date()) {
 #   n_exceed      Einheiten mit 30-s-Spitze über HFmax, aber unter der Plausibilitätsgrenze
 #   n_artifact    Einheiten mit 30-s-Spitze über der Plausibilitätsgrenze (vermutlich Artefakt)
 #   obs_max       höchste 30-s-Spitze ohne Artefakte: HFmax kann nicht darunter liegen
-hr_peak_stats <- function(acts, hr, p) {
+#   low           obs_max liegt mehr als tol bpm über HFmax (tol = übliche Messgenauigkeit des Handgelenk-Sensors)
+hr_peak_stats <- function(acts, hr, p, tol = 3) {
   ceil <- if (is.null(p$hr_ceiling) || is.na(p$hr_ceiling)) Inf else p$hr_ceiling
   with_hr <- acts[!is.na(acts$max_hr), ]
   out <- list(n_hr = nrow(with_hr), n_exceed_raw = sum(with_hr$max_hr > p$hrmax), n_peak = 0L,
-              n_exceed = NA_integer_, n_artifact = NA_integer_, obs_max = NA_real_, ceiling = p$hr_ceiling)
+              n_exceed = NA_integer_, n_artifact = NA_integer_, obs_max = NA_real_, low = FALSE, ceiling = p$hr_ceiling)
   if (is.null(hr) || nrow(hr) == 0) return(out)
   pk <- hr$hr_peak30[hr$activity_id %in% with_hr$activity_id]; pk <- pk[!is.na(pk)]
   out$n_peak     <- length(pk)
   out$n_exceed   <- sum(pk > p$hrmax & pk <= ceil)
   out$n_artifact <- sum(pk > ceil)
   out$obs_max    <- if (any(pk <= ceil)) max(pk[pk <= ceil]) else NA_real_
+  out$low        <- !is.na(out$obs_max) && out$obs_max > p$hrmax + tol
   out
 }
 
@@ -133,6 +135,7 @@ session_load <- function(acts, p, commute_hrr = 0.40, zones = NULL) {
 }
 
 # Wie stark hängt die Gesamt-TRIMP von den Annahmen ab? Variiert HFmax und Pendel-HFR je einzeln.
+# Bei HFmax-Varianten wird die Pendel-HFR aus den gemessenen Fahrten neu abgeleitet (gleicher Puls in bpm).
 trimp_sensitivity <- function(acts, p, commute_hrr, zones = NULL, hrmax_delta = c(-10, 0, 10),
                               commute = c(0.3, commute_hrr, 0.5)) {
   run <- function(pp, ch) {
@@ -140,7 +143,8 @@ trimp_sensitivity <- function(acts, p, commute_hrr, zones = NULL, hrmax_delta = 
     tibble(trimp_total = sum(s$trimp, na.rm = TRUE), share_est = sum(s$trimp[s$est], na.rm = TRUE) / sum(s$trimp, na.rm = TRUE))
   }
   hm <- bind_rows(lapply(hrmax_delta, function(dl) { pp <- p; pp$hrmax <- p$hrmax + dl
-    bind_cols(tibble(parameter = "HFmax", value = pp$hrmax), run(pp, commute_hrr)) }))
+    # Pendel-Puls ist in bpm gemessen: die HFR wird für jeden HFmax-Wert neu abgeleitet
+    bind_cols(tibble(parameter = "HFmax", value = pp$hrmax), run(pp, derive_commute_hrr(acts, pp, default = commute_hrr)$value)) }))
   cm <- bind_rows(lapply(commute, function(ch) bind_cols(tibble(parameter = "Pendel-HFR", value = ch), run(p, ch))))
   bind_rows(hm, cm)
 }

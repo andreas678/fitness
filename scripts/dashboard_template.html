@@ -228,7 +228,7 @@ function extraKpis(daily, from, to) {
   const bcls = a == null ? "" : (a > 1.5 ? "bad" : a >= 0.8 && a <= 1.3 ? "good" : "");
   const warn = d.filter(r => r.flags >= 2).length;
   const warn14 = daily.filter(r => inRange(r.t, maxT - 13 * DAY, maxT) && r.flags >= 2).length;
-  const hrLow = P.obs_max != null && P.obs_max > P.hrmax;   // 30-s-Spitze über HFmax: der Wert kann nicht stimmen
+  const hrLow = !!P.hr_low;   // 30-s-Spitze liegt über HFmax plus Sensor-Toleranz (in R berechnet)
   const lastOf = k => { const r = [...d].reverse().find(x => x[k] != null); return r ? r[k] : null; };
   const hrvAvg = mean(d.slice(-7).map(r => r.hrv_night)), hrvRow = [...d].reverse().find(r => r.hrv_night != null);
   const hrvCls = hrvRow ? (hrvRow.hrv_night < hrvRow.hrv_base_low ? "bad" : hrvRow.hrv_night >= hrvRow.hrv_base_low ? "good" : "") : "";
@@ -423,7 +423,7 @@ function renderZones() {
     rows = P.zones.map(z => { const n = inR.filter(a => a.zone === z.zone).length; return `<tr><td>${z.zone}</td><td class="num">${z.lo}–${z.hi}</td><td class="num">${n}</td><td class="num"></td></tr>`; }).join("");
     note1 = "Zonen nach Karvonen aus Durchschnittspuls je Einheit (Zeit in Zonen nicht verfügbar).";
   }
-  const hrLow = P.obs_max != null && P.obs_max > P.hrmax, pct = P.n_peak ? Math.round(P.n_exceed / P.n_peak * 100) : 0;
+  const hrLow = !!P.hr_low, pct = P.n_peak ? Math.round(P.n_exceed / P.n_peak * 100) : 0;
   const diff = G ? ` Dein HFmax-Wert: ${P.hrmax} bpm (${P.hrmax_source}); Garmin nutzt ${G.hrmax} bpm. Die Garmin-Zonen (Prozent von Garmins HFmax) und die Karvonen-Zonen (Herzfrequenzreserve) sind zwei verschiedene Systeme; die Belastung (TRIMP) nutzt die Herzfrequenzreserve mit deinem HFmax-Wert.` : "";
   document.getElementById("zones-card").innerHTML = `<h3>Herzfrequenz-Zonen</h3>
     <div class="sub">Alter ${P.age}, Ruhe-HF ${P.rhr_ref} bpm. ${G ? "Minuten im ausgewählten Zeitraum" : "Einheiten im Zeitraum"}</div>

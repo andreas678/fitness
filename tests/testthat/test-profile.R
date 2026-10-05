@@ -44,3 +44,10 @@ test_that("hr_peak_stats ohne Plausibilitätsgrenze klassifiziert keine Artefakt
   s <- hr_peak_stats(acts, hr, list(hrmax = 182, hr_ceiling = NA_real_))
   expect_equal(s$n_artifact, 0); expect_equal(s$obs_max, 212)
 })
+
+test_that("hr_peak_stats meldet 'HFmax zu niedrig' erst oberhalb der Sensor-Toleranz", {
+  expect_true(hr_peak_stats(acts, hr, list(hrmax = 182, hr_ceiling = 202))$low)          # 194 > 182 + 3
+  expect_false(hr_peak_stats(acts, hr, list(hrmax = 192, hr_ceiling = 202))$low)         # 194 <= 192 + 3
+  expect_true(hr_peak_stats(acts, hr, list(hrmax = 192, hr_ceiling = 202), tol = 1)$low)
+  expect_false(hr_peak_stats(acts, NULL, p0)$low)                                        # ohne Pulskurven keine Aussage
+})

@@ -112,7 +112,7 @@ meta <- list(
                  rhr_ref = prof$rhr_ref, zones = prof$zones,
                  n_hr_sessions = nrow(hr_sessions),
                  n_peak = peak$n_peak, n_exceed = peak$n_exceed, n_exceed_raw = peak$n_exceed_raw,
-                 n_artifact = peak$n_artifact, obs_max = peak$obs_max, hr_ceiling = prof$hr_ceiling))
+                 n_artifact = peak$n_artifact, obs_max = peak$obs_max, hr_low = peak$low, hr_ceiling = prof$hr_ceiling))
 
 to_json <- function(x) toJSON(x, dataframe = "rows", na = "null", digits = 3, auto_unbox = TRUE)
 payload <- paste0(
@@ -150,7 +150,7 @@ message(sprintf("Einheiten mit Puls: %d; Einzelwert-Maximum über HFmax: %d", pe
 if (peak$n_peak > 0) {
   message(sprintf("  30-s-Spitze über HFmax (%d bpm): %d von %d Einheiten mit Pulskurve; Artefakt-Verdacht (> %d bpm): %d; höchste 30-s-Spitze ohne Artefakte: %.0f bpm",
                   prof$hrmax, peak$n_exceed, peak$n_peak, prof$hr_ceiling, peak$n_artifact, peak$obs_max))
-  if (!is.na(peak$obs_max) && peak$obs_max > prof$hrmax) message("  -> HFmax vermutlich zu niedrig: per Feldtest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen.")
+  if (peak$low) message("  -> HFmax vermutlich zu niedrig: per Feldtest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen.")
 }
 if (peak$n_peak < peak$n_hr) message(sprintf("  Pulskurve für %d von %d Einheiten vorhanden (der Rest: garmin_fitness.R noch nicht gelaufen oder bei Garmin nicht verfügbar).", peak$n_peak, peak$n_hr))
 message(sprintf("Letzte 14 Tage: %d Tage mit >= 2 Erholungs-Signalen, ACWR aktuell %.2f",

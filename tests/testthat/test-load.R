@@ -114,3 +114,16 @@ test_that("trimp_sensitivity variiert HFmax und Pendel-HFR einzeln", {
   expect_true(all(diff(cm$trimp_total) > 0))
   expect_true(all(s$share_est > 0 & s$share_est < 1))
 })
+
+test_that("trimp_sensitivity leitet die Pendel-HFR bei jeder HFmax-Variante neu aus den gemessenen Fahrten ab", {
+  rides <- bind_rows(lapply(1:6, function(i) act(as.character(i), 40, 100 + 4 * i))) |> mutate(type_key = "cycling")
+  commute_ride <- bind_rows(rides, act("99", 30, NA) |> mutate(type_key = "cycling"))     # eine Fahrt ohne Puls
+  s <- trimp_sensitivity(commute_ride, p, commute_hrr = derive_commute_hrr(commute_ride, p)$value,
+                         zones = NULL, hrmax_delta = c(-10, 0, 10), commute = c(0.3, 0.4, 0.5))
+  hm <- s[s$parameter == "HFmax", ]
+  for (i in seq_len(nrow(hm))) {
+    pp <- p; pp$hrmax <- hm$value[i]
+    expected <- sum(session_load(commute_ride, pp, derive_commute_hrr(commute_ride, pp)$value)$trimp, na.rm = TRUE)
+    expect_equal(hm$trimp_total[i], expected)
+  }
+})
