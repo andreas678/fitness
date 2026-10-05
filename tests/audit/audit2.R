@@ -40,10 +40,10 @@ cat("Tageslast-Anteil est an chronic (mean):",mean(dl$load_est,na.rm=T)/mean(dl$
 # ACWR sensitivity: ohne geschaetzte Last; EWMA; uncoupled
 ew <- function(x,lam){y<-numeric(length(x));y[1]<-x[1];for(i in 2:length(x))y[i]<-ifelse(is.na(x[i]),y[i-1],x[i]*lam+(1-lam)*y[i-1]);y}
 l <- dl$load; l2 <- ifelse(is.na(l),0,l)
-ac <- roll_apply(l,7,mean,5); ch <- roll_apply(l,28,mean,14)
-dl$acwr_meas <- roll_apply(dl$load_meas,7,mean,5)/roll_apply(dl$load_meas,28,mean,14)
+ac <- roll_apply(l,dl$date,7,mean,5); ch <- roll_apply(l,dl$date,28,mean,14)
+dl$acwr_meas <- roll_apply(dl$load_meas,dl$date,7,mean,5)/roll_apply(dl$load_meas,dl$date,28,mean,14)
 dl$acwr_ewma <- ew(l2,2/8)/ew(l2,2/29)
-ch_unc <- roll_apply(l,21,mean,10,lag_by=7); dl$acwr_unc <- ac/ch_unc
+ch_unc <- roll_apply(l,dl$date,21,mean,10,lag_by=7); dl$acwr_unc <- ac/ch_unc
 print(round(cor(dl[,c("acwr","acwr_meas","acwr_ewma","acwr_unc")],use="pairwise.complete.obs"),2))
 cat("Zeit im Band 0.8-1.3: own",mean(dl$acwr>=.8&dl$acwr<=1.3,na.rm=T)," meas-only",mean(dl$acwr_meas>=.8&dl$acwr_meas<=1.3,na.rm=T)," ewma",mean(dl$acwr_ewma>=.8&dl$acwr_ewma<=1.3,na.rm=T)," unc",mean(dl$acwr_unc>=.8&dl$acwr_unc<=1.3,na.rm=T),"\n")
 cat("Tage ACWR>1.3: own",sum(dl$acwr>1.3,na.rm=T)," meas-only",sum(dl$acwr_meas>1.3,na.rm=T)," ewma",sum(dl$acwr_ewma>1.3,na.rm=T)," unc",sum(dl$acwr_unc>1.3,na.rm=T),"\n")

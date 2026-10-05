@@ -199,6 +199,18 @@ const savePref = (k, v) => { try { localStorage.setItem(PREF_PREFIX + k, v ? "1"
 Object.assign(state, presetRange(90, minT, maxT));
 
 // ---- Daten aufbereiten -------------------------------------------------------
+// <rollMean>
+// Rollierendes Mittel über Kalendertage (rein, ohne DOM). Gegenstück zu roll_apply() in helpers.R; beide müssen die Fälle
+// in tests/fixtures/rolling.json erfüllen (getestet in tests/js/test_roll_mean.mjs). times: UTC-Mitternacht je Tag, aufsteigend.
+// Das Fenster sind die letzten k Kalendertage einschließlich des Tages; fehlende Tage und null zählen als fehlende Werte.
+function rollMean(values, times, k, minN) {
+  return values.map((_, i) => {
+    const lo = times[i] - (k - 1) * DAY, w = [];
+    for (let j = i; j >= 0 && times[j] >= lo; j--) if (values[j] != null && !Number.isNaN(values[j])) w.push(values[j]);
+    return w.length >= minN ? mean(w) : null;
+  });
+}
+// </rollMean>
 function prepDaily() {
   const rows = DAILY.map(r => {
     const x = { ...r, t: tOf(r.date) };
@@ -207,10 +219,8 @@ function prepDaily() {
     x.steps_ok = x.partial ? null : x.steps;                 // unvollständige Tage zählen nicht in Mittel und KPIs
     return x;
   }).sort((a, b) => a.t - b.t);
-  const roll = k => rows.map((_, i) => {           // wie roll_mean() in R: mind. 3 Werte der letzten 7 Tage
-    const w = rows.slice(Math.max(0, i - 6), i + 1).map(r => r[k]).filter(v => v != null);
-    return w.length >= 3 ? mean(w) : null;
-  });
+  const times = rows.map(r => r.t);
+  const roll = k => rollMean(rows.map(r => r[k]), times, 7, 3);   // wie roll_apply() in R: mind. 3 Werte der letzten 7 Kalendertage
   const s7 = roll("steps_ok"), r7 = roll("resting_hr"), h7 = roll("hrv_night");
   rows.forEach((r, i) => { r.steps_7d = s7[i]; r.rhr_7d = r7[i]; r.hrv_7d = h7[i]; });
   return rows;
