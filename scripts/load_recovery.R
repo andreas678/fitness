@@ -179,6 +179,42 @@ roll_apply <- function(x, k, fun, min_n, lag_by = 0) {
   }, numeric(1))
 }
 
+# ---- Aufbau und Ermüdung (Banister / Performance-Management-Chart) -----------------------------
+# Zwei exponentiell gewichtete Mittel der Tageslast: "Fitness" (CTL, lange Zeitkonstante) und "Ermüdung"
+# (ATL, kurze); Form = Fitness minus Ermüdung vom Vortag. Aufbau X_t = X_{t-1} + (L_t - X_{t-1}) (1 - exp(-1/tau)).
+# Das misst aufgebaute Trainingslast, keine gemessene Leistung. Die Last ist TRIMP, nicht TSS: Schwellen
+# aus TrainingPeaks-Beschreibungen gelten hier nicht.
+# Unbekannte Tage (usable = FALSE: Last unbekannt, Uhr nicht getragen, unvollständiger Tag) ändern den Zustand
+# nicht (eingefroren, pmc_gap = TRUE); sie werden nicht als Last 0 gerechnet. Start: Mittel der ersten
+# init_days nutzbaren Tage (init_days = 0: Start bei 0), die ersten tau_fit Tage gelten als Einschwingphase.
+fitness_fatigue <- function(load, usable, tau_fit = 42, tau_fat = 7, init_days = 14) {
+  n <- length(load)
+  out <- tibble(ctl = rep(NA_real_, n), atl = NA_real_, tsb = NA_real_,
+                pmc_gap = !usable, pmc_warmup = seq_len(n) <= tau_fit)
+  if (n == 0 || !any(usable)) return(out)
+  x <- ifelse(usable, load, NA_real_)
+  start <- if (init_days > 0) mean(head(x[usable], init_days)) else 0
+  a_fit <- 1 - exp(-1 / tau_fit); a_fat <- 1 - exp(-1 / tau_fat)
+  ctl <- atl <- start
+  for (t in seq_len(n)) {
+    out$tsb[t] <- ctl - atl                                  # Vortagswerte
+    if (usable[t]) { ctl <- ctl + (x[t] - ctl) * a_fit; atl <- atl + (x[t] - atl) * a_fat }
+    out$ctl[t] <- ctl; out$atl[t] <- atl
+  }
+  out
+}
+
+# Wie stark hängt der Endstand von der Behandlung unbekannter Tage ab? (nur zum Ausweisen der Spannweite)
+pmc_sensitivity <- function(load, usable, ...) {
+  med <- median(load[usable], na.rm = TRUE)
+  last <- function(l, u) { r <- fitness_fatigue(l, u, ...); c(ctl = tail(r$ctl, 1), atl = tail(r$atl, 1), tsb = tail(r$tsb, 1)) }
+  v <- list("einfrieren" = last(load, usable),
+            "Median auffüllen" = last(ifelse(usable, load, med), rep(TRUE, length(load))),
+            "0 setzen" = last(ifelse(usable, load, 0), rep(TRUE, length(load))))
+  tibble(variante = names(v), ctl = vapply(v, `[`, 0, "ctl"), atl = vapply(v, `[`, 0, "atl"),
+         tsb = vapply(v, `[`, 0, "tsb"))
+}
+
 daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
   daily <- flag_daily(arrange(daily, date))
   per_day <- acts_s |>
@@ -224,6 +260,7 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
     chronic_m = roll_apply(load_meas_acwr, 28, mean, 14),
     acwr_meas = ifelse(!is.na(chronic_m) & chronic_m >= 1, acute_m / chronic_m, NA_real_)
   )
+  d <- bind_cols(d, fitness_fatigue(d$load, !d$unrecorded & !d$partial))
 
   # persönliche Baselines (28 Tage vor dem jeweiligen Tag, mind. 14 Werte), aus bereinigten Werten
   cl    <- clean_daily(d, extra_cols = "bb_high")   # Artefakt-Ruhepuls und ungültige Nächte = NA
