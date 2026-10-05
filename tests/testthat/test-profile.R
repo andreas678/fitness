@@ -51,3 +51,33 @@ test_that("hr_peak_stats meldet 'HFmax zu niedrig' erst oberhalb der Sensor-Tole
   expect_true(hr_peak_stats(acts, hr, list(hrmax = 192, hr_ceiling = 202), tol = 1)$low)
   expect_false(hr_peak_stats(acts, NULL, p0)$low)                                        # ohne Pulskurven keine Aussage
 })
+
+# ---- Hilfen: Tanaka, Herzfrequenzreserve, Zonengrenzen -----------------------------------------
+test_that("tanaka_hrmax rundet 208 - 0,7 x Alter", {
+  expect_equal(tanaka_hrmax(52), 172)      # 208 - 36,4 = 171,6
+  expect_equal(tanaka_hrmax(c(30, 40)), c(187, 180))
+  expect_true(is.na(tanaka_hrmax(NA_real_)))
+})
+
+test_that("hrr_frac: Anteil der Herzfrequenzreserve, standardmäßig auf 0 bis 1 begrenzt", {
+  p <- list(rhr_ref = 50, hrmax = 190)
+  expect_equal(hrr_frac(c(50, 120, 190), p), c(0, 0.5, 1))
+  expect_equal(hrr_frac(c(40, 200), p), c(0, 1))                       # begrenzt
+  expect_equal(hrr_frac(c(40, 200), p, clip = FALSE), c(-10 / 140, 150 / 140))
+  m <- matrix(c(50, 120, 190, 260), 2)
+  expect_equal(hrr_frac(m, p), matrix(c(0, 0.5, 1, 1), 2))             # Matrizen (Zonenmitten) bleiben Matrizen
+  expect_true(is.na(hrr_frac(NA_real_, p)))
+})
+
+test_that("ZONE_EDGES liegen den Zonen und der Zonenzuordnung zugrunde", {
+  expect_equal(ZONE_EDGES, c(.5, .6, .7, .8, .9))
+  p <- list(rhr_ref = 50, hrmax = 190)
+  w <- with_env(c(BIRTHDAY = "01-01-1974", HRMAX = "190", GENDER = "male"), athlete_profile(50, today))$zones
+  expect_equal(w$lo, round(50 + 140 * ZONE_EDGES))
+  expect_equal(w$hi, round(50 + 140 * c(ZONE_EDGES[-1], 1)))
+  # Zuordnung in session_load: je Zone ein Beispiel (HF bei 55, 65, 75, 85, 95 % der Reserve, dazu eine unter Z1)
+  hf <- 50 + 140 * c(.4, .55, .65, .75, .85, .95)
+  acts <- tibble(activity_id = as.character(1:6), type_key = "hiit", avg_hr = hf, duration_min = 30)
+  s <- session_load(acts, c(p, list(trimp_b = 1.92)))
+  expect_equal(s$zone, c("<Z1", paste0("Z", 1:5)))
+})

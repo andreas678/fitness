@@ -12,6 +12,17 @@
 # =============================================================================
 
 # ---- Profil, Zonen ---------------------------------------------------------------
+# Tanaka-Schätzung der HFmax aus dem Alter (Streuung etwa +-10 bpm)
+tanaka_hrmax <- function(age) round(208 - 0.7 * age)
+# Herzfrequenzreserve-Anteil (HF - HFruhe) / (HFmax - HFruhe) aus dem Profil `p` (rhr_ref, hrmax);
+# clip = TRUE begrenzt auf 0 bis 1 (Standard), clip = FALSE lässt Werte außerhalb stehen (für die Zonenzuordnung).
+hrr_frac <- function(hr, p, clip = TRUE) {
+  f <- (hr - p$rhr_ref) / (p$hrmax - p$rhr_ref)
+  if (clip) pmin(pmax(f, 0), 1) else f
+}
+# Untergrenzen der Zonen Z1-Z5 als Anteil der Herzfrequenzreserve (Karvonen); Z5 reicht bis 100 %
+ZONE_EDGES <- c(.5, .6, .7, .8, .9)
+
 athlete_profile <- function(rhr_ref, today = Sys.Date()) {
   bd <- suppressWarnings(as.Date(Sys.getenv("BIRTHDAY"),
                                  tryFormats = c("%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y")))
@@ -20,18 +31,18 @@ athlete_profile <- function(rhr_ref, today = Sys.Date()) {
   if (is.finite(hr_env) && hr_env > 0) {
     hrmax <- hr_env; src <- "eingestellt via HRMAX"   # nicht automatisch "gemessen": Wert stammt aus der Konfiguration
   } else if (!is.na(age)) {
-    hrmax <- round(208 - 0.7 * age); src <- "geschätzt (Tanaka)"
+    hrmax <- tanaka_hrmax(age); src <- "geschätzt (Tanaka)"
   } else stop("BIRTHDAY (TT-MM-JJJJ) oder HRMAX in ~/.Renviron setzen.")
   male <- !tolower(Sys.getenv("GENDER")) %in% c("female", "f", "w", "weiblich")
   hrr  <- hrmax - rhr_ref
   # Plausibilitätsgrenze für Pulsspitzen: Tanaka-Schätzung + 30 bpm (etwa 3 Streuungen der individuellen
   # HFmax). Ein 30-Sekunden-Mittel darüber gilt als Artefakt (z. B. optischer Sensor rastet auf die Bewegung ein).
-  hr_ceiling <- if (is.na(age)) NA_real_ else round(208 - 0.7 * age) + 30
+  hr_ceiling <- if (is.na(age)) NA_real_ else tanaka_hrmax(age) + 30
   list(age = age, male = male, hrmax = hrmax, hrmax_source = src, hr_ceiling = hr_ceiling, rhr_ref = rhr_ref,
        trimp_b = if (male) 1.92 else 1.67,                   # Banister-TRIMP-Faktor
        zones = tibble(zone = paste0("Z", 1:5),
-                      lo = round(rhr_ref + hrr * c(.5, .6, .7, .8, .9)),
-                      hi = round(rhr_ref + hrr * c(.6, .7, .8, .9, 1))))
+                      lo = round(rhr_ref + hrr * ZONE_EDGES),
+                      hi = round(rhr_ref + hrr * c(ZONE_EDGES[-1], 1))))
 }
 
 # ---- Spitzenpuls prüfen: HFmax gegen die 30-Sekunden-Spitzen der Einheiten ---------------------------
@@ -71,7 +82,7 @@ zone_trimp <- function(zones, p) {
   mids <- cbind((zones$z1_low + zones$z2_low) / 2, (zones$z2_low + zones$z3_low) / 2,
                 (zones$z3_low + zones$z4_low) / 2, (zones$z4_low + zones$z5_low) / 2,
                 (zones$z5_low + hrmax_g) / 2)
-  hrr  <- pmin(pmax((mids - p$rhr_ref) / (p$hrmax - p$rhr_ref), 0), 1)
+  hrr  <- hrr_frac(mids, p)
   secs <- as.matrix(zones[paste0("z", 1:5, "_s")]); secs[is.na(secs)] <- 0
   tibble(activity_id = zones$activity_id,
          trimp_z = rowSums(banister(secs / 60, hrr, p$trimp_b)),
@@ -102,8 +113,8 @@ zone_by_activity <- function(zt, acts) {
 # Weniger als min_n gemessene Fahrten: Standardwert (Annahme). Kleine Stichprobe: die Spannweite
 # wird mit ausgegeben, damit die Unsicherheit sichtbar bleibt.
 derive_commute_hrr <- function(acts, p, default = 0.40, min_n = 5) {
-  r <- acts[acts$type_key %in% "cycling" & !is.na(acts$avg_hr), ]
-  hrr <- pmin(pmax((r$avg_hr - p$rhr_ref) / (p$hrmax - p$rhr_ref), 0), 1)
+  r <- acts[is_ride_type(acts$type_key) & !is.na(acts$avg_hr), ]
+  hrr <- hrr_frac(r$avg_hr, p)
   if (length(hrr) < min_n)
     return(list(value = default, n = length(hrr), lo = NA_real_, hi = NA_real_, hr = NA_real_, hr_lo = NA_real_,
                 hr_hi = NA_real_, source = "Annahme"))
@@ -117,7 +128,7 @@ derive_commute_hrr <- function(acts, p, default = 0.40, min_n = 5) {
 # Gespeichert wird nur ein abgeleiteter Wert (save = TRUE); die Annahme 0,40 bleibt ungespeichert, damit
 # später abgeleitet werden kann.
 resolve_commute <- function(ref, acts, p, recalc = FALSE, default = 0.40, min_n = 5) {
-  to_hrr <- function(hr) pmin(pmax((hr - p$rhr_ref) / (p$hrmax - p$rhr_ref), 0), 1)
+  to_hrr <- function(hr) hrr_frac(hr, p)
   if (!recalc && !is.null(ref$commute_hr) && is.finite(ref$commute_hr)) {
     num <- function(x) if (is.null(x)) NA_real_ else x
     return(list(value = round(to_hrr(ref$commute_hr), 2), n = num(ref$commute_n),
@@ -133,11 +144,11 @@ resolve_commute <- function(ref, acts, p, recalc = FALSE, default = 0.40, min_n 
 session_load <- function(acts, p, commute_hrr = 0.40, zones = NULL) {
   zt <- zone_by_activity(zone_trimp(zones, p), acts)
   out <- acts |> mutate(
-    hrr       = (avg_hr - p$rhr_ref) / (p$hrmax - p$rhr_ref),
-    est       = is.na(avg_hr) & type_key %in% "cycling",
+    hrr       = hrr_frac(avg_hr, p, clip = FALSE),
+    est       = is.na(avg_hr) & is_ride_type(type_key),
     hrr_use   = pmin(pmax(ifelse(est, commute_hrr, hrr), 0), 1),
     trimp     = ifelse(is.na(hrr_use), NA_real_, banister(duration_min, hrr_use, p$trimp_b)),
-    zone      = as.character(cut(hrr, c(-Inf, .5, .6, .7, .8, .9, Inf),
+    zone      = as.character(cut(hrr, c(-Inf, ZONE_EDGES, Inf),
                                  labels = c("<Z1", paste0("Z", 1:5)))),
     pct_hrmax = avg_hr / p$hrmax * 100
   ) |> select(-hrr, -hrr_use)

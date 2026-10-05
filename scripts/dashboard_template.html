@@ -170,12 +170,15 @@ footer { color: var(--muted); font-size: 12px; padding: 14px 4px; }
 // Konstanten kommen aus R (helpers.R, weather.R) über META; hier stehen dafür keine Literale
 // (tests/js/test_meta_constants.mjs prüft das).
 const GROUP_COLORS = META.group_colors, STEP_GOAL = META.step_goal, HEAT_C = META.heat_c, ACWR = META.acwr;
-const PHASE_COLORS = { Tief: "#1F4E79", Leicht: "#6BAED6", REM: "#9E7BB5", Wach: "#E69F00" };
+const PALETTE = { orange: "#E69F00", blue: "#0072B2", vermillion: "#D55E00", pink: "#CC79A7", red: "#B3261E", sky: "#56B4E9", navy: "#1F4E79", teal: "#1B7F79", paleBlue: "#A6C8E0", purple: "#7B5EA7", slate: "#34495E" };   // Farben, die mehrfach vorkommen (Okabe-Ito und Ergänzungen)
+const PHASE_COLORS = { Tief: PALETTE.navy, Leicht: "#6BAED6", REM: "#9E7BB5", Wach: PALETTE.orange };
 const DAY = 86400000;
 const MIN_SLEEP_H = META.min_sleep_h, SLEEP_COLS = META.sleep_cols;   // Schwellen und Spalten kommen aus helpers.R
 
 const nf = (v, d = 0) => (v == null || Number.isNaN(v)) ? "–"
   : v.toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtP = p => p == null ? "–" : p < 0.001 ? "&lt; 0,001" : nf(p, 3);
+const sg = (v, d = 1) => (v > 0 ? "+" : "") + nf(v, d);        // Zahl mit Vorzeichen
 const acwrRange = () => `${nf(ACWR.low, 1)}–${nf(ACWR.high, 1)}`;
 const ACWR_LOW_LABEL = `Untergrenze ${nf(ACWR.low, 1)}`;
 const tOf =s => Date.parse(s.slice(0, 10) + "T00:00:00Z");
@@ -334,10 +337,9 @@ function extraKpis(daily, from, to) {
   const wIn = WEIGHT.filter(w => inRange(tOf(w.date), from, to)), wAll = WEIGHT.filter(w => tOf(w.date) <= to);
   const wLast = wAll.length ? wAll[wAll.length - 1] : null, wFirst = wIn.length ? wIn[0] : null;
   const wTrend = weightChange(wIn.map(w => ({ t: tOf(w.date), kg: w.weight_kg })));   // null: zu wenige Wiegungen im Zeitraum
-  const sgn = v => (v > 0 ? "+" : "") + nf(v, 1);
   const wText = wTrend
-    ? (wTrend.lo > 0 || wTrend.hi < 0 ? `Trend ${sgn(wTrend.change)} kg [${sgn(wTrend.lo)}; ${sgn(wTrend.hi)}] in ${nf(wTrend.span)} Tagen`
-                                      : `keine belastbare Veränderung (${sgn(wTrend.change)} kg [${sgn(wTrend.lo)}; ${sgn(wTrend.hi)}])`) + ` · ${wTrend.n} Wiegungen`
+    ? (wTrend.lo > 0 || wTrend.hi < 0 ? `Trend ${sg(wTrend.change)} kg [${sg(wTrend.lo)}; ${sg(wTrend.hi)}] in ${nf(wTrend.span)} Tagen`
+                                      : `keine belastbare Veränderung (${sg(wTrend.change)} kg [${sg(wTrend.lo)}; ${sg(wTrend.hi)}])`) + ` · ${wTrend.n} Wiegungen`
     : `${wIn.length} Wiegung${wIn.length === 1 ? "" : "en"} im Zeitraum: zu wenige für einen Trend` + (wLast ? " · letzte " + wLast.date.slice(5).split("-").reverse().join(".") : "");
   const hasHrv = d.some(r => r.hrv_night != null), hasReady = d.some(r => r.ready_score != null);
   const more = (hasHrv ? `<div class="kpi"><div class="l">HRV (Ø 7 Nächte)</div><div class="v">${nf(hrvAvg)}<small>ms</small></div><div class="d ${hrvCls}">${hrvRow ? "letzte Nacht " + nf(hrvRow.hrv_night) + " (Normal " + nf(hrvRow.hrv_base_low) + "–" + nf(hrvRow.hrv_base_high) + ")" : ""}</div></div>` : "") +
@@ -351,12 +353,16 @@ function extraKpis(daily, from, to) {
 }
 
 // ---- Charts --------------------------------------------------------------------
+const legendBottom = (labelExtra = {}) => ({ position: "bottom", labels: { usePointStyle: true, boxWidth: 8, ...labelExtra } });
+const xAxis = (extra = {}) => ({ grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0 }, ...extra });
+const gridX = st => xAxis({ stacked: st });
+const noLegend = hide => ({ legend: legendBottom({ filter: i => !hide.includes(i.text) }) });
 function baseOpts(extra = {}) {
   return Object.assign({
     responsive: true, maintainAspectRatio: false, animation: false,
     interaction: { mode: "index", intersect: false },
-    plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } } },
-    scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0 } },
+    plugins: { legend: legendBottom() },
+    scales: { x: xAxis(),
               y: { grid: { color: css("--grid") } } },
   }, extra);
 }
@@ -365,56 +371,54 @@ function makeCharts() {
   Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   const mk = (id, cfg) => charts[id] = new Chart(document.getElementById(id), cfg);
   mk("c-steps", { data: { labels: [], datasets: [
-      { type: "bar", label: "Schritte", data: [], backgroundColor: "#A6C8E0", order: 3 },
-      { type: "line", label: "7-Tage-Mittel", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25, order: 1 },
+      { type: "bar", label: "Schritte", data: [], backgroundColor: PALETTE.paleBlue, order: 3 },
+      { type: "line", label: "7-Tage-Mittel", data: [], borderColor: PALETTE.blue, borderWidth: 2.5, pointRadius: 0, tension: .25, order: 1 },
       { type: "line", label: "Ziel", data: [], borderColor: "#888", borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, order: 2 }] },
-    options: baseOpts({ plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+    options: baseOpts({ plugins: { legend: legendBottom(),
       tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y)}`,
         afterLabel: c => (c.datasetIndex === 0 && dayRows[c.dataIndex] && dayRows[c.dataIndex].partial) ? "unvollständiger Tag, nicht im Mittel" : "" } } } }) });
   mk("c-rhr", { data: { labels: [], datasets: [
-      { type: "line", label: "Ruhepuls", data: [], showLine: false, borderColor: "#E69F00", backgroundColor: "#E69F0099", pointRadius: 3 },
-      { type: "line", label: "7-Tage-Mittel", data: [], borderColor: "#D55E00", borderWidth: 2.5, pointRadius: 0, tension: .25 }] },
-    options: baseOpts({ scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0 } },
+      { type: "line", label: "Ruhepuls", data: [], showLine: false, borderColor: PALETTE.orange, backgroundColor: "#E69F0099", pointRadius: 3 },
+      { type: "line", label: "7-Tage-Mittel", data: [], borderColor: PALETTE.vermillion, borderWidth: 2.5, pointRadius: 0, tension: .25 }] },
+    options: baseOpts({ scales: { x: xAxis(),
       y: { grid: { color: css("--grid") }, title: { display: true, text: "bpm" } } } }) });
   mk("c-sleep", { type: "bar", data: { labels: [], datasets: ["Tief", "Leicht", "REM", "Wach"].map(p =>
       ({ label: p, data: [], backgroundColor: PHASE_COLORS[p], stack: "s" })) },
-    options: baseOpts({ scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0 } },
+    options: baseOpts({ scales: { x: gridX(true),
       y: { stacked: true, grid: { color: css("--grid") }, title: { display: true, text: "h" } } },
-      plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+      plugins: { legend: legendBottom(),
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 1)} h` } } } }) });
   mk("c-bb", { type: "line", data: { labels: [], datasets: [
       { label: "Tiefstwert", data: [], borderColor: "#006B4F", borderWidth: 1.5, pointRadius: 0, tension: .2 },
       { label: "Höchstwert", data: [], borderColor: "#009E73", backgroundColor: "#009E7355", borderWidth: 1.5, pointRadius: 0, tension: .2, fill: "-1" }] },
-    options: baseOpts({ scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0 } },
+    options: baseOpts({ scales: { x: xAxis(),
       y: { min: 0, max: 100, grid: { color: css("--grid") } } } }) });
   mk("c-week", { type: "bar", data: { labels: [], datasets: [] },
-    options: baseOpts({ scales: { x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0 } },
+    options: baseOpts({ scales: { x: xAxis({ stacked: true, ticks: { maxRotation: 0 } }),
       y: { stacked: true, grid: { color: css("--grid") }, title: { display: true, text: "h" } } },
-      plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+      plugins: { legend: legendBottom(),
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 1)} h` } } } }) });
-  const gridX = (st) => ({ stacked: st, grid: { display: false }, ticks: { maxTicksLimit: 10, maxRotation: 0 } });
-  const noLegend = hide => ({ legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8, filter: i => !hide.includes(i.text) } } });
   mk("c-load", { data: { labels: [], datasets: [
-      { type: "bar", label: "Gemessen (Puls)", data: [], backgroundColor: "#CC79A7", stack: "load", order: 3 },
+      { type: "bar", label: "Gemessen (Puls)", data: [], backgroundColor: PALETTE.pink, stack: "load", order: 3 },
       { type: "bar", label: "Geschätzt (Pendeln)", data: [], backgroundColor: "#9CC3E0", stack: "load", order: 3 },
-      { type: "line", label: "Akut (7 Tage Ø)", data: [], borderColor: "#D55E00", borderWidth: 2.5, pointRadius: 0, tension: .25, stack: "acute", order: 1 },
-      { type: "line", label: "Chronisch (28 Tage Ø)", data: [], borderColor: "#1F4E79", borderWidth: 2.5, pointRadius: 0, tension: .25, stack: "chronic", order: 2 }] },
+      { type: "line", label: "Akut (7 Tage Ø)", data: [], borderColor: PALETTE.vermillion, borderWidth: 2.5, pointRadius: 0, tension: .25, stack: "acute", order: 1 },
+      { type: "line", label: "Chronisch (28 Tage Ø)", data: [], borderColor: PALETTE.navy, borderWidth: 2.5, pointRadius: 0, tension: .25, stack: "chronic", order: 2 }] },
     options: baseOpts({ scales: { x: gridX(true), y: { stacked: true, grid: { color: css("--grid") }, title: { display: true, text: "TRIMP / Tag" } } },
-      plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+      plugins: { legend: legendBottom(),
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 0)}`, footer: dayFooter } } } }) });
   mk("c-acwr", { type: "line", data: { labels: [], datasets: [
       { label: ACWR_LOW_LABEL, data: [], borderWidth: 0, pointRadius: 0 },
       { label: `Richtbereich ${acwrRange()}`, data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#009E7335", fill: "-1" },
-      { label: "ACWR (eigene Berechnung)", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25 },
+      { label: "ACWR (eigene Berechnung)", data: [], borderColor: PALETTE.blue, borderWidth: 2.5, pointRadius: 0, tension: .25 },
       { label: "ACWR (Garmin)", data: [], borderColor: "#888", borderDash: [5, 4], borderWidth: 1.8, pointRadius: 0, tension: .25 },
-      { label: "ACWR (nur gemessene Last)", data: [], borderColor: "#CC79A7", borderDash: [2, 3], borderWidth: 1.8, pointRadius: 0, tension: .25 }] },
+      { label: "ACWR (nur gemessene Last)", data: [], borderColor: PALETTE.pink, borderDash: [2, 3], borderWidth: 1.8, pointRadius: 0, tension: .25 }] },
     options: baseOpts({ plugins: Object.assign(noLegend([ACWR_LOW_LABEL]), { tooltip: { filter: i => i.dataset.label.startsWith("ACWR"), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 2)}`, footer: dayFooter } } }),
       scales: { x: gridX(false), y: { min: 0, grid: { color: css("--grid") } } } }) });
   mk("c-rhrbase", { type: "line", data: { labels: [], datasets: [
       { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0 },
       { label: "Normalbereich (28 Tage ± 1,5 SD)", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#99999933", fill: "-1" },
       { label: "Baseline", data: [], borderColor: "#888", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0 },
-      { label: "Ruhepuls", data: [], showLine: false, borderColor: "#E69F00", backgroundColor: "#E69F00", pointRadius: 3.5 }] },
+      { label: "Ruhepuls", data: [], showLine: false, borderColor: PALETTE.orange, backgroundColor: PALETTE.orange, pointRadius: 3.5 }] },
     options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze"]), { tooltip: { filter: i => ["Ruhepuls", "Baseline"].includes(i.dataset.label), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 1)} bpm` } } }),
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "bpm" } } } }) });
   const pmcDim = c => { const r = dayRows[c.p1DataIndex]; return !!r && (r.pmc_gap || r.pmc_warmup); };
@@ -422,8 +426,8 @@ function makeCharts() {
     segment: { borderDash: c => pmcDim(c) ? [4, 3] : undefined, borderColor: c => pmcDim(c) ? col + "88" : col } });
   const pmcFooter = items => { const r = dayRows[items[0].dataIndex];
     return [dayNote(r), r && r.pmc_gap ? "Zustand eingefroren (Last unbekannt)" : "", r && r.pmc_warmup ? "Einschwingphase" : ""].filter(Boolean); };
-  mk("c-pmc", { type: "line", data: { labels: [], datasets: [pmcLine("Fitness (aufgebaute Last)", "#1F4E79"), pmcLine("Ermüdung", "#D55E00")] },
-    options: baseOpts({ plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+  mk("c-pmc", { type: "line", data: { labels: [], datasets: [pmcLine("Fitness (aufgebaute Last)", PALETTE.navy), pmcLine("Ermüdung", PALETTE.vermillion)] },
+    options: baseOpts({ plugins: { legend: legendBottom(),
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 1)}`, footer: pmcFooter } } },
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "TRIMP / Tag (gewichtetes Mittel)" } } } }) });
   mk("c-form", { type: "bar", data: { labels: [], datasets: [{ label: "Form", data: [], backgroundColor: [] }] },
@@ -431,16 +435,16 @@ function makeCharts() {
         tooltip: { callbacks: { label: c => `Form: ${nf(c.parsed.y, 1)} (${c.parsed.y >= 0 ? "Fitness über Ermüdung" : "Ermüdung über Fitness"})`, footer: pmcFooter } } },
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "Form" } } } }) });
   const trendChart = (id, unit) => mk(id, { type: "line", data: { labels: [], datasets: [
-      { label: "Wochenmittel", data: [], showLine: false, borderColor: "#0072B2", backgroundColor: "#0072B2", pointRadius: 4 },
+      { label: "Wochenmittel", data: [], showLine: false, borderColor: PALETTE.blue, backgroundColor: PALETTE.blue, pointRadius: 4 },
       { label: "Trend (Fenster)", data: [], borderColor: "#888", borderDash: [5, 4], borderWidth: 1.8, pointRadius: 0, spanGaps: true },
-      { label: "Trend (alle Wochen)", data: [], borderColor: "#CC79A7", borderDash: [2, 3], borderWidth: 1.8, pointRadius: 0, spanGaps: true }] },
+      { label: "Trend (alle Wochen)", data: [], borderColor: PALETTE.pink, borderDash: [2, 3], borderWidth: 1.8, pointRadius: 0, spanGaps: true }] },
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.y == null ? "" : `${c.dataset.label}: ${nf(c.parsed.y, 1)} ${unit}` } } },
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: unit } } } }) });
   trendChart("c-tr-resting_hr", "bpm"); trendChart("c-tr-hrv_night", "ms"); trendChart("c-tr-sleep_hr", "bpm");
   mk("c-wx", { type: "bar", data: { labels: [], datasets: [
       { type: "bar", label: "Höchsttemperatur", data: [], backgroundColor: [], yAxisID: "y2", order: 2 },
-      { type: "line", label: "Ruhepuls (7-Tage-Mittel)", data: [], borderColor: "#0072B2", borderWidth: 2.5, pointRadius: 0, tension: .25, spanGaps: true, yAxisID: "y", order: 1 }] },
-    options: baseOpts({ plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } },
+      { type: "line", label: "Ruhepuls (7-Tage-Mittel)", data: [], borderColor: PALETTE.blue, borderWidth: 2.5, pointRadius: 0, tension: .25, spanGaps: true, yAxisID: "y", order: 1 }] },
+    options: baseOpts({ plugins: { legend: legendBottom(),
         tooltip: { callbacks: { label: c => c.parsed.y == null ? "" : `${c.dataset.label}: ${nf(c.parsed.y, 1)} ${c.datasetIndex === 0 ? "°C" : "bpm"}`, footer: dayFooter } } },
       scales: { x: gridX(false), y: { position: "left", beginAtZero: false, grid: { color: css("--grid") }, title: { display: true, text: "Ruhepuls (bpm)" } },
         y2: { position: "right", grid: { display: false }, title: { display: true, text: "Höchsttemperatur (°C)" }, suggestedMin: 0 } } }) });
@@ -453,7 +457,7 @@ function makeCharts() {
   mk("c-hrv", { type: "line", data: { labels: [], datasets: [
       { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0 },
       { label: "Garmin-Normalbereich", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#99999933", fill: "-1" },
-      { label: "HRV Nacht", data: [], showLine: false, borderColor: "#7B5EA7", backgroundColor: "#7B5EA7", pointRadius: 3 },
+      { label: "HRV Nacht", data: [], showLine: false, borderColor: PALETTE.purple, backgroundColor: PALETTE.purple, pointRadius: 3 },
       { label: "7-Tage-Mittel", data: [], borderColor: "#4B2E83", borderWidth: 2.5, pointRadius: 0, tension: .25 }] },
     options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze"]), { tooltip: { filter: i => ["HRV Nacht", "7-Tage-Mittel"].includes(i.dataset.label), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 0)} ms` } } }),
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "ms" } } } }) });
@@ -461,21 +465,21 @@ function makeCharts() {
     options: baseOpts({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => { const r = readyRows[c.dataIndex]; return `Score ${nf(c.parsed.y)} (${r.ready_level || "–"})`; } } } },
       scales: { x: gridX(false), y: { min: 0, max: 100, grid: { color: css("--grid") } } } }) });
   mk("c-sleeptime", { type: "line", data: { labels: [], datasets: [
-      { label: "Einschlafen", data: [], borderColor: "#34495E", backgroundColor: "#34495E", pointRadius: 2.5, borderWidth: 1.5, tension: .2 },
-      { label: "Aufwachen", data: [], borderColor: "#E69F00", backgroundColor: "#E69F00", pointRadius: 2.5, borderWidth: 1.5, tension: .2 }] },
-    options: baseOpts({ plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${hhmm(c.parsed.y)}` } } },
+      { label: "Einschlafen", data: [], borderColor: PALETTE.slate, backgroundColor: PALETTE.slate, pointRadius: 2.5, borderWidth: 1.5, tension: .2 },
+      { label: "Aufwachen", data: [], borderColor: PALETTE.orange, backgroundColor: PALETTE.orange, pointRadius: 2.5, borderWidth: 1.5, tension: .2 }] },
+    options: baseOpts({ plugins: { legend: legendBottom(), tooltip: { callbacks: { label: c => `${c.dataset.label}: ${hhmm(c.parsed.y)}` } } },
       scales: { x: gridX(false), y: { min: 4, max: 28, grid: { color: css("--grid") }, ticks: { stepSize: 4, callback: v => hhmm(v) } } } }) });
   mk("c-vitals", { data: { labels: [], datasets: [
       { type: "bar", label: "Hauttemperatur-Abweichung (°C)", data: [], backgroundColor: "#D55E00AA", yAxisID: "y", order: 2 },
-      { type: "line", label: "SpO₂ Ø (%)", data: [], borderColor: "#0072B2", borderWidth: 1.5, pointRadius: 0, yAxisID: "y2", order: 1 },
-      { type: "line", label: "SpO₂ min (%)", data: [], borderColor: "#56B4E9", borderWidth: 1.5, pointRadius: 0, yAxisID: "y2", order: 1 }] },
+      { type: "line", label: "SpO₂ Ø (%)", data: [], borderColor: PALETTE.blue, borderWidth: 1.5, pointRadius: 0, yAxisID: "y2", order: 1 },
+      { type: "line", label: "SpO₂ min (%)", data: [], borderColor: PALETTE.sky, borderWidth: 1.5, pointRadius: 0, yAxisID: "y2", order: 1 }] },
     options: baseOpts({ scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "°C" } },
       y2: { position: "right", min: 80, max: 100, grid: { display: false }, title: { display: true, text: "% SpO₂" } } } }) });
   mk("c-weight", { type: "line", data: { labels: [], datasets: [
       { label: "Untergrenze", data: [], borderWidth: 0, pointRadius: 0, spanGaps: true },
       { label: "Trend 95 %-Band", data: [], borderWidth: 0, pointRadius: 0, backgroundColor: "#1B7F7933", fill: "-1", spanGaps: true },
-      { label: "Trend", data: [], borderColor: "#1B7F79", borderWidth: 2.5, pointRadius: 0, tension: .25, spanGaps: true },
-      { label: "Wiegung", data: [], showLine: false, borderColor: "#1B7F79", backgroundColor: "#1B7F79", pointRadius: 4 }] },
+      { label: "Trend", data: [], borderColor: PALETTE.teal, borderWidth: 2.5, pointRadius: 0, tension: .25, spanGaps: true },
+      { label: "Wiegung", data: [], showLine: false, borderColor: PALETTE.teal, backgroundColor: PALETTE.teal, pointRadius: 4 }] },
     options: baseOpts({ plugins: Object.assign(noLegend(["Untergrenze"]), { tooltip: { filter: i => ["Trend", "Wiegung"].includes(i.dataset.label), callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y, 1)} kg` } } }),
       scales: { x: gridX(false), y: { grid: { color: css("--grid") }, title: { display: true, text: "kg" } } } }) });
   mk("c-ride", { type: "bar", data: { labels: [], datasets: [{ label: "km", data: [], backgroundColor: GROUP_COLORS["Rad"] }] },
@@ -492,7 +496,7 @@ let flagRows = [], readyRows = [], dayRows = [];
 const dayNote = r => !r ? "" : r.load_unknown ? "Last unbekannt" + (r.ann_note ? ": " + r.ann_note : " (Uhr getragen, nichts aufgezeichnet)")
   : r.no_wear ? "Uhr vermutlich nicht getragen" : r.ann_note ? r.ann_note : r.partial ? "unvollständiger Tag" : "";
 const dayFooter = items => dayNote(dayRows[items[0].dataIndex]);
-const indexColor = v => v == null ? "#00000000" : v <= META.rec_index.threshold ? "#B3261E" : v <= -1 ? "#E69F00" : "#9aa5b1";
+const indexColor = v => v == null ? "#00000000" : v <= META.rec_index.threshold ? PALETTE.red : v <= -1 ? PALETTE.orange : "#9aa5b1";
 function estShare(d) {
   const lo = d.length ? d[0].t : minT, hi = d.length ? d[d.length - 1].t : maxT;
   const inR = ACTS.filter(a => inRange(actT(a), lo, hi) && a.trimp != null);
@@ -523,17 +527,17 @@ function updateLoadCharts(d, L) {
   setData("c-acwr", L, [d.map(() => ACWR.low), d.map(() => ACWR.high), d.map(r => r.acwr), d.map(r => r.ts_acwr), d.map(r => r.acwr_meas)]);
   renderLoadNote(d);
   setData("c-pmc", L, [d.map(r => r.ctl), d.map(r => r.atl)]);
-  charts["c-form"].data.datasets[0].backgroundColor = d.map(r => (r.tsb >= 0 ? "#56B4E9" : "#E69F00") + (r.pmc_gap || r.pmc_warmup ? "66" : ""));
+  charts["c-form"].data.datasets[0].backgroundColor = d.map(r => (r.tsb >= 0 ? PALETTE.sky : PALETTE.orange) + (r.pmc_gap || r.pmc_warmup ? "66" : ""));
   setData("c-form", L, [d.map(r => r.tsb)]);
   renderPmcNote(d);
   updateWeather(d, L);
   const rh = r => r.resting_hr;                             // Artefakte sind in prepDaily schon entfernt
   setData("c-rhrbase", L, [d.map(r => r.rhr_lo), d.map(r => r.rhr_hi), d.map(r => r.rhr_base), d.map(rh)]);
-  const c = charts["c-rhrbase"]; c.data.datasets[3].pointBackgroundColor = d.map(r => r.sig_rhr ? "#B3261E" : "#E69F00");
+  const c = charts["c-rhrbase"]; c.data.datasets[3].pointBackgroundColor = d.map(r => r.sig_rhr ? PALETTE.red : PALETTE.orange);
   c.data.datasets[3].pointRadius = d.map(r => r.sig_rhr ? 5 : 3); c.update("none");
   flagRows = d; readyRows = d;
   setData("c-hrv", L, [d.map(r => r.hrv_base_low), d.map(r => r.hrv_base_high), d.map(r => r.hrv_night), d.map(r => r.hrv_7d)]);
-  const rc = charts["c-ready"]; rc.data.datasets[0].backgroundColor = d.map(r => r.ready_score == null ? "#00000000" : r.ready_score >= 75 ? "#1a7f4b" : r.ready_score >= 50 ? "#56B4E9" : r.ready_score >= 25 ? "#E69F00" : "#B3261E");
+  const rc = charts["c-ready"]; rc.data.datasets[0].backgroundColor = d.map(r => r.ready_score == null ? "#00000000" : r.ready_score >= 75 ? "#1a7f4b" : r.ready_score >= 50 ? PALETTE.sky : r.ready_score >= 25 ? PALETTE.orange : PALETTE.red);
   setData("c-ready", L, [d.map(r => r.ready_score)]);
   setData("c-sleeptime", L, [d.map(r => r.bed_h), d.map(r => r.wake_h)]);
   setData("c-vitals", L, [d.map(r => r.skin_temp_dev), d.map(r => r.spo2_avg), d.map(r => r.spo2_low)]);
@@ -552,7 +556,7 @@ function updateWeather(d, L) {
   if (!W || !W.n_days || !state.showWeather) { card.style.display = "none"; return; }   // nur auf Wunsch (Checkbox im Kopf)
   card.style.display = "";
   document.getElementById("wx-title").textContent = `Temperatur (${W.place}) und Ruhepuls`;
-  charts["c-wx"].data.datasets[0].backgroundColor = d.map(r => r.tmax != null && r.tmax >= HEAT_C ? "#D55E00" : "#F2C9A0");
+  charts["c-wx"].data.datasets[0].backgroundColor = d.map(r => r.tmax != null && r.tmax >= HEAT_C ? PALETTE.vermillion : "#F2C9A0");
   setData("c-wx", L, [d.map(r => r.tmax), d.map(r => r.rhr_7d)]);
   charts["c-wx"].resize();                                   // war die Karte ausgeblendet, hat das Diagramm noch keine Größe
   const hot = d.filter(r => r.tmax != null && r.tmax >= HEAT_C).length;
@@ -563,8 +567,6 @@ function renderWeather() {
   const W = META.weather, FX = WEATHER_FX;
   if (!W || !W.n_days) return;
   const NAMES = { resting_hr: ["Ruhepuls", 2], sleep_hr: ["Puls im Schlaf", 2], hrv_night: ["HRV nachts", 1], sleep_h: ["Schlafdauer", 2], stress_avg: ["Stress (Garmin-Wert)", 2] };
-  const fmtP = p => p == null ? "–" : p < 0.001 ? "&lt; 0,001" : nf(p, 3);
-  const sg = (v, d) => (v > 0 ? "+" : "") + nf(v, d);
   const rows = FX.map(r => { const [name, dec] = NAMES[r.metric] || [r.metric, 2];
     return `<tr><td>${name}</td><td class="num">${sg(r.effect, dec)} ${r.effect_unit.replace(" je +5 °C", "")} <small>[${sg(r.lo, dec)}; ${sg(r.hi, dec)}]</small></td><td class="num">${fmtP(r.p_holm)}</td><td class="num">${r.n}</td><td>${r.verdict}</td></tr>`; }).join("");
   document.getElementById("wx-table").innerHTML = FX.length
@@ -582,13 +584,13 @@ function renderTrends() {
   const UNIT = { resting_hr: "bpm", hrv_night: "ms", sleep_hr: "bpm" }, FAV = { resting_hr: "fallend", hrv_night: "steigend", sleep_hr: "fallend" };
   const rows = T.trend.map(r => {
     const w = T.weekly.filter(x => x.metric === r.metric), last = w.length ? w[w.length - 1] : null;
-    const sg = v => (v > 0 ? "+" : "") + nf(v, r.slope_unit === "%/Woche" ? 1 : 2);
-    const slope = r.slope == null ? "–" : `${sg(r.slope)} ${r.slope_unit} <small>[${sg(r.lo)}; ${sg(r.hi)}]</small>`;
+    const dsl = r.slope_unit === "%/Woche" ? 1 : 2;           // Dezimalstellen der Steigung
+    const slope = r.slope == null ? "–" : `${sg(r.slope, dsl)} ${r.slope_unit} <small>[${sg(r.lo, dsl)}; ${sg(r.hi, dsl)}]</small>`;
     const ch = charts["c-tr-" + r.metric];
     const at = t => w.find(q => tOf(q.week) === t);
     if (ch) setData("c-tr-" + r.metric, L, [weeks.map(t => at(t) ? at(t).value : null), weeks.map(t => at(t) && at(t).fit != null ? at(t).fit : null),
                                             weeks.map(t => at(t) && at(t).fit_all != null ? at(t).fit_all : null)]);
-    const allTxt = r.slope_all == null ? "–" : `${sg(r.slope_all)} ${r.slope_unit} <small>[${sg(r.lo_all)}; ${sg(r.hi_all)}]</small>`;
+    const allTxt = r.slope_all == null ? "–" : `${sg(r.slope_all, dsl)} ${r.slope_unit} <small>[${sg(r.lo_all, dsl)}; ${sg(r.hi_all, dsl)}]</small>`;
     const verdictTxt = r.window_sensitive ? `${r.verdict} im Fenster, ${r.verdict_all} insgesamt: hängt vom Fenster ab` : r.verdict;
     return `<tr><td>${NAMES[r.metric]}</td><td class="num">${last ? nf(last.value, 1) + " " + UNIT[r.metric] : "–"}</td><td class="num">${slope}<br><small>${r.n_weeks} von ${weeks.length} Wochen</small></td>` +
       `<td class="num">${allTxt}<br><small>${r.n_weeks_all} Wochen</small></td>` +
@@ -602,9 +604,7 @@ function renderTrends() {
     `Das ist ein Zusammenhang, keine Ursache: Die Werte ändern sich auch durch Schlaf, Stress, Wärme und Krankheit. Das Intervall ist bei so wenigen Wochen nur eine Näherung.`;
 }
 function renderRecovery() {
-  const fmtP = p => p == null ? "–" : p < 0.001 ? "&lt; 0,001" : nf(p, 3);
   const dec = m => m.includes("Tiefschlaf") ? 2 : (m.includes("puls") || m.includes("Puls") ? 1 : 0);
-  const sg = (v, d) => (v > 0 ? "+" : "") + nf(v, d);
   const ci = (lo, hi, d) => `<small>[${nf(lo, d)}; ${nf(hi, d)}]</small>`;
   const WD = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"], D = META.recovery_design || [];
   const both = D.filter(r => r.both).map(r => WD[r.wd - 1]);
@@ -653,7 +653,7 @@ function updateCharts(daily) {
   const d = daily.filter(r => inRange(r.t, from, to));
   const L = d.map(r => label(r.t));
   dayRows = d;
-  charts["c-steps"].data.datasets[0].backgroundColor = d.map(r => r.partial ? "#A6C8E066" : "#A6C8E0");
+  charts["c-steps"].data.datasets[0].backgroundColor = d.map(r => r.partial ? "#A6C8E066" : PALETTE.paleBlue);
   setData("c-steps", L, [d.map(r => r.steps), d.map(r => r.steps_7d), d.map(() => STEP_GOAL)]);
   setData("c-rhr", L, [d.map(r => r.resting_hr), d.map(r => r.rhr_7d)]);
   setData("c-sleep", L, [d.map(r => r.deep_h), d.map(r => r.light_h), d.map(r => r.rem_h), d.map(r => r.awake_h)]);
