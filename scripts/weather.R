@@ -94,20 +94,21 @@ weather_effects <- function(daily, min_n = 30, nw_lag = 7, today = Sys.Date()) {
     if (!m %in% names(d)) next
     y <- d[[m]]
     if (m == "stress_avg") y[!is.na(y) & y < 0] <- NA            # -1 = kein Wert
-    if (WEATHER_METRICS$log[i]) y <- ifelse(!is.na(y) & y > 0, log(y), NA_real_)
+    if (WEATHER_METRICS$log[i]) y <- ln_or_na(y)
     ok <- keep & !is.na(y)
     if (sum(ok) < min_n) next
     dd <- data.frame(y = y[ok], t3 = d$t3[ok])
     f <- stats::lm(y ~ t3, dd)
-    se <- sqrt(sandwich::NeweyWest(f, lag = nw_lag, prewhite = FALSE, adjust = TRUE)["t3", "t3"])
-    tc <- stats::qt(0.975, f$df.residual); b <- 5 * unname(coef(f)["t3"]); lo <- b - tc * 5 * se; hi <- b + tc * 5 * se
-    tf <- if (WEATHER_METRICS$log[i]) function(z) 100 * (exp(z) - 1) else identity
-    rows[[m]] <- tibble::tibble(metric = m, effect = tf(b), lo = tf(lo), hi = tf(hi), n = as.integer(sum(ok)),
-                                effect_unit = WEATHER_METRICS$unit[i], p = 2 * stats::pt(-abs(b / (5 * se)), f$df.residual))
+    # Lag 7: Der Prädiktor t3 ist selbst ein 3-Tage-Mittel (Überlappung) und Wetterlagen halten oft eine Woche an;
+    # eine Woche gewählt, nicht an den Daten geprüft. Effekt je +5 °C: Schätzung und Intervall mal 5.
+    e <- nw_effect(f, "t3", nw_lag)
+    tf <- if (WEATHER_METRICS$log[i]) pct_from_ln else identity
+    rows[[m]] <- tibble::tibble(metric = m, effect = tf(5 * e$est), lo = tf(5 * e$lo), hi = tf(5 * e$hi), n = as.integer(sum(ok)),
+                                effect_unit = WEATHER_METRICS$unit[i], p = e$p)
   }
   if (length(rows) == 0) return(weather_effects_empty())
   out <- dplyr::bind_rows(rows)
-  out$p_holm <- stats::p.adjust(out$p, "holm")                    # Mehrfachtest über die geprüften Kennwerte
+  out$p_holm <- stats::p.adjust(out$p, "holm")                    # Mehrfachtest über alle geprüften Kennwerte (die Zahl hängt davon ab, wie viele min_n erreichen)
   out$verdict <- ifelse(out$p_holm >= 0.05, "kein klarer Zusammenhang", ifelse(out$effect > 0, "höher bei Hitze", "niedriger bei Hitze"))
   out[c("metric", "effect", "lo", "hi", "n", "effect_unit", "p", "p_holm", "verdict")]
 }

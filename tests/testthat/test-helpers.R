@@ -181,3 +181,43 @@ test_that("daily_load_recovery bildet ACWR-Fenster über Kalendertage, auch bei 
   expect_true(is.na(at("2026-06-29")))               # Fenster 23.-29.6.: nur 4 Tage vorhanden (26.-29.6.)
   expect_equal(at("2026-06-30"), 50)                 # Fenster 24.-30.6.: 5 Tage vorhanden (26.-30.6.)
 })
+
+# ---- Hilfen für die Inferenz-Module ---------------------------------------------------------------
+test_that("nw_effect liefert Schätzung, Newey-West-SE, t-Intervall und p-Wert eines Koeffizienten", {
+  set.seed(11); n <- 120; x <- rnorm(n); y <- 2 + 0.5 * x + as.numeric(arima.sim(list(ar = 0.5), n))
+  f <- lm(y ~ x)
+  e <- nw_effect(f, "x", lag = 3)
+  se <- sqrt(sandwich::NeweyWest(f, lag = 3, prewhite = FALSE, adjust = TRUE)["x", "x"])
+  expect_equal(e$est, unname(coef(f)["x"]))
+  expect_equal(e$se, se)
+  expect_equal(e$df, f$df.residual)
+  tc <- qt(0.975, f$df.residual)
+  expect_equal(c(e$lo, e$hi), unname(coef(f)["x"]) + c(-1, 1) * tc * se)
+  expect_equal(e$p, unname(2 * pt(-abs(coef(f)["x"] / se), f$df.residual)))
+  expect_false(is.null(names(e)) || anyNA(unlist(e)))
+  expect_null(names(e$est))                           # kein Namensrest aus coef()
+})
+
+test_that("nw_effect: ein größerer Lag verbreitert das Intervall bei autokorrelierten Daten", {
+  set.seed(3); n <- 200; x <- as.numeric(arima.sim(list(ar = 0.8), n)); y <- 0.3 * x + as.numeric(arima.sim(list(ar = 0.8), n))
+  f <- lm(y ~ x)
+  expect_gt(nw_effect(f, "x", 7)$se, nw_effect(f, "x", 0)$se)
+})
+
+test_that("nw_effect trifft den Faktor-Term eines Modells mit Wochentag", {
+  set.seed(2); n <- 100; g <- rbinom(n, 1, 0.3) == 1; wd <- factor(rep(1:5, length.out = n)); y <- 1 + 0.8 * g + rnorm(n)
+  f <- lm(y ~ g + wd)
+  e <- nw_effect(f, "gTRUE", 3)
+  expect_equal(e$est, unname(coef(f)["gTRUE"]))
+  expect_equal(e$df, n - 6)
+})
+
+test_that("ln_or_na und pct_from_ln: nur positive Werte, Prozent aus ln-Differenzen", {
+  expect_warning(r <- ln_or_na(c(40, 0, -3, NA)), NA)    # keine Warnung bei 0 oder negativen Werten
+  expect_equal(r, c(log(40), NA, NA, NA))
+  expect_equal(ln_or_na(numeric()), numeric())
+  expect_equal(pct_from_ln(log(1.1)), 10)
+  expect_equal(pct_from_ln(0), 0)
+  expect_equal(pct_from_ln(log(0.8)), -20)
+  expect_equal(pct_from_ln(ln_or_na(c(50, 55))[2] - ln_or_na(c(50, 55))[1]), 10)   # 50 -> 55 sind +10 %
+})

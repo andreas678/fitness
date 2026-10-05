@@ -271,7 +271,7 @@ daily_load_recovery <- function(daily, acts_s, min_gap_days = 10) {
     list(m = m, s = s, z = ifelse(!is.na(s) & s > 0, (x - m) / s, NA_real_))
   }
   hrv   <- if ("hrv_night" %in% names(cl)) cl$hrv_night else rep(NA_real_, nrow(d))
-  hrv   <- ifelse(!is.na(hrv) & hrv > 0, log(hrv), NA_real_)   # HRV schwankt multiplikativ: z auf der ln-Skala
+  hrv   <- ln_or_na(hrv)                                       # HRV schwankt multiplikativ: z auf der ln-Skala
   zr <- z(rhr); zs <- z(sleep); zb <- z(bb); zh <- z(hrv)
   d$rhr_base <- zr$m; d$rhr_lo <- zr$m - 1.5 * zr$s; d$rhr_hi <- zr$m + 1.5 * zr$s
   d$rhr_z <- zr$z; d$sleep_z <- zs$z; d$bb_z <- zb$z; d$hrv_z <- zh$z
@@ -349,20 +349,17 @@ recovery_data <- function(d) {
 # Näherung: Lücken im Kalender (ausgeschlossene Tage, fehlende Werte) bleiben unberücksichtigt, die
 # Beobachtungen gelten für die Autokorrelation als aufeinanderfolgend.
 recovery_model <- function(x, lag = 3, min_n = 5) {
-  both_days <- recovery_design(x)$wd[recovery_design(x)$both]
+  rd <- recovery_design(x); both_days <- rd$wd[rd$both]
   fit <- function(dat, m) {
     dat$y <- dat[[m]]; dat <- dat[!is.na(dat$y), ]
     a <- dat$y[dat$hiit]; b <- dat$y[!dat$hiit]
     if (length(a) < min_n || length(b) < min_n || sd(dat$y) == 0) return(NULL)   # konstanter Kennwert: kein Effekt schätzbar
     multi <- nlevels(droplevels(dat$wd)) > 1
     f <- if (multi) lm(y ~ hiit + droplevels(wd), data = dat) else lm(y ~ hiit, data = dat)
-    est <- coef(f)["hiitTRUE"]
-    if (is.na(est)) return(NULL)
-    se <- sqrt(sandwich::NeweyWest(f, lag = lag, prewhite = FALSE, adjust = TRUE)["hiitTRUE", "hiitTRUE"])
-    df <- f$df.residual; tc <- qt(0.975, df)
+    if (is.na(coef(f)["hiitTRUE"])) return(NULL)
+    e <- nw_effect(f, "hiitTRUE", lag)   # Lag 3: Folgetag-Werte sind über wenige Tage autokorreliert (Faustregel n^(1/4), bei 100-180 Tagen etwa 3-4); gewählt, nicht an den Daten geprüft
     sp <- sqrt(((length(a) - 1) * var(a) + (length(b) - 1) * var(b)) / (length(a) + length(b) - 2))
-    list(a = a, b = b, est = unname(est), lo = unname(est - tc * se), hi = unname(est + tc * se),
-         p = unname(2 * pt(-abs(est / se), df)), d = unname(est / sp))
+    list(a = a, b = b, est = e$est, lo = e$lo, hi = e$hi, p = e$p, d = e$est / sp)
   }
   rows <- lapply(seq_len(nrow(RECOVERY_METRICS)), function(i) {
     m <- RECOVERY_METRICS$col[i]
@@ -380,7 +377,7 @@ recovery_model <- function(x, lag = 3, min_n = 5) {
   out <- bind_rows(rows)
   if (is.null(out) || nrow(out) == 0) return(out)
   out$p_holm <- NA_real_
-  out$p_holm[out$independent] <- p.adjust(out$p[out$independent], method = "holm")
+  out$p_holm[out$independent] <- p.adjust(out$p[out$independent], method = "holm")   # Holm nur über die unabhängigen Kennwerte (Training Readiness enthält Garmins Last und wird nicht bewertet)
   out
 }
 
