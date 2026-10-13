@@ -52,6 +52,47 @@ test_that("hr_peak_stats meldet 'HFmax zu niedrig' erst oberhalb der Sensor-Tole
   expect_false(hr_peak_stats(acts, NULL, p0)$low)                                        # ohne Pulskurven keine Aussage
 })
 
+# Sensor-Phasen: Handgelenk bis 17.09.2026, Brustgurt (HIIT, Indoor-Rad) ab 18.09.2026
+acts_s <- tibble(
+  activity_id = as.character(1:7), max_hr = c(223, 199, 201, 177, 172, 177, 190),
+  start = as.POSIXct(c("2026-05-11 17:01", "2026-06-22 17:01", "2026-09-17 17:02", "2026-09-18 17:00",
+                       "2026-10-05 17:00", "2026-10-07 19:19", "2026-10-08 18:02"), tz = "UTC"),
+  type_key = c("hiit", "hiit", "hiit", "hiit", "hiit", "indoor_cycling", "cycling"))
+hr_s <- tibble(activity_id = as.character(1:7), hr_peak30 = c(212, 193.9, 186.1, 175.7, 170, 175.5, 185),
+               hr_max_raw = c(223, 199, 201, 177, 172, 177, 190))
+p_s <- list(hrmax = 178, hr_ceiling = 202)
+strap_day <- as.Date("2026-09-18")
+
+test_that("hr_peak_stats mit strap_from wertet nur Brustgurt-Einheiten (HIIT und Indoor-Rad ab dem Stichtag)", {
+  s <- hr_peak_stats(acts_s, hr_s, p_s, strap_from = strap_day)
+  expect_equal(s$basis, "strap")
+  expect_equal(s$n_hr, 3); expect_equal(s$n_peak, 3)          # Ids 4, 5, 6; die Pendelfahrt (7) hat unbekannten Sensor
+  expect_equal(s$n_exceed_raw, 0)                              # 177, 172, 177 <= 178
+  expect_equal(s$n_exceed, 0); expect_equal(s$n_artifact, 0)
+  expect_equal(s$obs_max, 175.7)
+  expect_false(s$low)                                          # die Handgelenk-Spitzen 186-194 lösen keinen Alarm mehr aus
+  expect_equal(s$n_wrist, 4)                                   # Ids 1, 2, 3, 7
+  expect_equal(s$obs_max_wrist, 193.9)                         # 212 ist Artefakt und zählt nicht
+  expect_equal(s$strap_from, strap_day)
+})
+
+test_that("hr_peak_stats: Stichtag ist inklusive, der Tag davor zählt als Handgelenk", {
+  s <- hr_peak_stats(acts_s, hr_s, p_s, strap_from = as.Date("2026-09-17"))
+  expect_equal(s$n_hr, 4)                                      # Id 3 (17.09.) kommt dazu
+  expect_equal(s$obs_max, 186.1); expect_true(s$low)           # 186,1 > 178 + 3
+  s2 <- hr_peak_stats(acts_s, hr_s, p_s, strap_from = as.Date("2026-09-19"))
+  expect_equal(s2$n_hr, 2)                                     # Id 4 (18.09.) fällt weg
+})
+
+test_that("hr_peak_stats ohne strap_from oder ohne Brustgurt-Einheit zählt alle Einheiten", {
+  a <- hr_peak_stats(acts_s, hr_s, p_s)
+  expect_equal(a$basis, "all"); expect_equal(a$n_hr, 7); expect_equal(a$n_wrist, 0)
+  expect_equal(a$n_artifact, 1); expect_equal(a$obs_max, 193.9); expect_true(a$low)
+  f <- hr_peak_stats(acts_s, hr_s, p_s, strap_from = as.Date("2027-01-01"))   # Stichtag in der Zukunft
+  expect_equal(f$basis, "all"); expect_equal(f$obs_max, 193.9)
+  expect_equal(hr_peak_stats(acts_s, hr_s, p_s, strap_from = NA)$basis, "all")
+})
+
 # ---- Hilfen: Tanaka, Herzfrequenzreserve, Zonengrenzen -----------------------------------------
 test_that("tanaka_hrmax rundet 208 - 0,7 x Alter", {
   expect_equal(tanaka_hrmax(52), 172)      # 208 - 36,4 = 171,6

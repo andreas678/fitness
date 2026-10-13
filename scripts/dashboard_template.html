@@ -636,15 +636,18 @@ function renderZones() {
     note1 = "Zonen nach Karvonen aus Durchschnittspuls je Einheit (Zeit in Zonen nicht verfügbar).";
   }
   const hrLow = !!P.hr_low, pct = P.n_peak ? Math.round(P.n_exceed / P.n_peak * 100) : 0;
+  const strap = P.hr_basis === "strap";   // HFmax-Prüfung nur mit Brustgurt-Einheiten (in R gewählt)
   const diff = G ? ` Dein HFmax-Wert: ${P.hrmax} bpm (${P.hrmax_source}); Garmin nutzt ${G.hrmax} bpm. Die Garmin-Zonen (Prozent von Garmins HFmax) und die Karvonen-Zonen (Herzfrequenzreserve) sind zwei verschiedene Systeme; die Belastung (TRIMP) nutzt die Herzfrequenzreserve mit deinem HFmax-Wert.` : "";
   document.getElementById("zones-card").innerHTML = `<h3>Herzfrequenz-Zonen</h3>
     <div class="sub">Alter ${P.age}, Ruhe-HF ${P.rhr_ref} bpm. ${G ? "Minuten im ausgewählten Zeitraum" : "Einheiten im Zeitraum"}</div>
     <div class="mini-wrap"><table class="mini"><thead><tr><th>Zone</th><th>bpm</th><th>${G ? "Minuten" : "Einheiten"}</th><th>Anteil</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="note">${note1}${diff}</div>
     <div class="note ${hrLow ? "warn" : ""}">${P.n_peak > 0
-      ? `${P.n_exceed} von ${P.n_peak} Einheiten mit Pulskurve (${pct} %) hatten eine 30-Sekunden-Spitze über dem HFmax-Wert (${P.hrmax} bpm), höchster Wert ${nf(P.obs_max)} bpm.` +
+      ? (strap ? `Gewertet werden nur Einheiten mit Brustgurt (ab ${P.strap_from}). ` : "") +
+        `${P.n_exceed} von ${P.n_peak} Einheiten mit Pulskurve (${pct} %) hatten eine 30-Sekunden-Spitze über dem HFmax-Wert (${P.hrmax} bpm), höchster Wert ${nf(P.obs_max)} bpm.` +
+        (strap && P.n_wrist ? ` ${P.n_wrist} Einheiten mit Handgelenk-Sensor zählen hier nicht (deren höchste 30-Sekunden-Spitze: ${nf(P.obs_max_wrist)} bpm, vermutlich Sensor-Überschätzung).` : "") +
         (P.n_artifact ? ` ${P.n_artifact} Einheit${P.n_artifact > 1 ? "en" : ""} mit Spitze über ${P.hr_ceiling} bpm ${P.n_artifact > 1 ? "gelten" : "gilt"} als Artefakt des Handgelenk-Sensors.` : "") +
-        (hrLow ? " HFmax vermutlich zu niedrig: per Feldtest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen." : "") +
+        (hrLow ? ` HFmax vermutlich zu niedrig: per Feldtest${strap ? "" : " oder Brustgurt"} prüfen und als HRMAX in ~/.Renviron eintragen.` : "") +
         ` Einzelwert-Maximum über HFmax: ${P.n_exceed_raw} von ${P.n_hr_sessions} (anfällig für Sensor-Ausreißer).`
       : `${P.n_exceed_raw} von ${P.n_hr_sessions} Einheiten hatten einen Einzelwert über dem HFmax-Wert (${P.hrmax} bpm); ohne Pulskurve nicht unterscheidbar von Sensor-Ausreißern.`}</div>`
 }
