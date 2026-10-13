@@ -63,7 +63,7 @@ Der Ordner `data/` ist git-ignoriert, denn er enthält Gesundheits- und Standort
 | `garmin_daily.csv` | Tageswerte (Schritte, Ruhepuls, Schlaf, HRV, Readiness, Body Battery …) mit Erfolgsmarken `fx_*` je Abruf |
 | `garmin_activities.csv` | einzelne Aktivitäten |
 | `garmin_activity_zones.csv` | Zeit in Herzfrequenzzonen je Aktivität |
-| `garmin_activity_hr.csv` | Spitzenpuls je Aktivität (30-Sekunden-Mittel aus der Pulskurve) |
+| `garmin_activity_hr.csv` | Spitzenpuls je Aktivität (30-Sekunden-Mittel aus der Pulskurve). Der Handgelenk-Sensor überschätzt Spitzen: Die HFmax-Prüfung im Dashboard wertet nur Einheiten mit Brustgurt (`HR_STRAP_FROM` und `HR_STRAP_TYPES` in `scripts/helpers.R`) |
 | `garmin_weight.csv` | Wiegungen |
 | `weather.csv` | Tagestemperaturen (Höchst-, Tiefst-, Mittelwert) am Wohnort aus Open-Meteo |
 | `profile.json` | feste Referenzwerte (Ruhepuls, Pendel-Puls in bpm) |

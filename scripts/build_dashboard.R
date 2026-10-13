@@ -122,8 +122,7 @@ wtrend <- if (!is.null(weight_raw)) weight_trend(weight_raw) else NULL   # NULL 
 weights_trend <- if (is.null(wtrend)) tibble(date = character(), fit = numeric(), lo = numeric(), hi = numeric()) else
   wtrend |> transmute(date = format(date), fit = round(fit, 2), lo = round(lo, 2), hi = round(hi, 2))
 
-hr_sessions <- acts_s |> filter(!is.na(max_hr))
-peak <- hr_peak_stats(acts_s, hr_raw, prof)
+peak <- hr_peak_stats(acts_s, hr_raw, prof, strap_from = HR_STRAP_FROM)   # HFmax-Prüfung nur mit Brustgurt-Einheiten
 meta <- list(
   built = format(Sys.time(), "%d.%m.%Y %H:%M"),
   recovery_design = recov_design,
@@ -146,9 +145,11 @@ meta <- list(
          n_sessions = nrow(zones_raw)) else NULL,
   profile = list(age = prof$age, hrmax = prof$hrmax, hrmax_source = prof$hrmax_source,
                  rhr_ref = prof$rhr_ref, zones = prof$zones,
-                 n_hr_sessions = nrow(hr_sessions),
+                 n_hr_sessions = peak$n_hr,
                  n_peak = peak$n_peak, n_exceed = peak$n_exceed, n_exceed_raw = peak$n_exceed_raw,
-                 n_artifact = peak$n_artifact, obs_max = peak$obs_max, hr_low = peak$low, hr_ceiling = prof$hr_ceiling))
+                 n_artifact = peak$n_artifact, obs_max = peak$obs_max, hr_low = peak$low, hr_ceiling = prof$hr_ceiling,
+                 hr_basis = peak$basis, strap_from = if (peak$basis == "strap") format(peak$strap_from, "%d.%m.%Y") else NA_character_,
+                 n_wrist = peak$n_wrist, obs_max_wrist = peak$obs_max_wrist))
 
 to_json <- function(x) toJSON(x, dataframe = "rows", na = "null", digits = 3, auto_unbox = TRUE)
 payload <- paste0(
@@ -187,10 +188,13 @@ for (i in seq_len(nrow(sens)))
   message(sprintf("  %-10s %6.2f -> TRIMP %5.0f (%2.0f %% geschätzt)", sens$parameter[i], sens$value[i],
                   sens$trimp_total[i], sens$share_est[i] * 100))
 message(sprintf("Einheiten mit Puls: %d; Einzelwert-Maximum über HFmax: %d", peak$n_hr, peak$n_exceed_raw))
+if (peak$basis == "strap")
+  message(sprintf("  HFmax-Prüfung nur mit Brustgurt-Einheiten (ab %s); %d Handgelenk-Einheiten nicht gewertet, deren höchste 30-s-Spitze %s bpm.",
+                  format(peak$strap_from, "%d.%m.%Y"), peak$n_wrist, if (is.na(peak$obs_max_wrist)) "–" else sprintf("%.0f", peak$obs_max_wrist)))
 if (peak$n_peak > 0) {
   message(sprintf("  30-s-Spitze über HFmax (%d bpm): %d von %d Einheiten mit Pulskurve; Artefakt-Verdacht (> %d bpm): %d; höchste 30-s-Spitze ohne Artefakte: %.0f bpm",
                   prof$hrmax, peak$n_exceed, peak$n_peak, prof$hr_ceiling, peak$n_artifact, peak$obs_max))
-  if (peak$low) message("  -> HFmax vermutlich zu niedrig: per Feldtest oder Brustgurt prüfen und als HRMAX in ~/.Renviron eintragen.")
+  if (peak$low) message("  -> HFmax vermutlich zu niedrig: per Feldtest", if (peak$basis != "strap") " oder Brustgurt", " prüfen und als HRMAX in ~/.Renviron eintragen.")
 }
 if (peak$n_peak < peak$n_hr) message(sprintf("  Pulskurve für %d von %d Einheiten vorhanden (der Rest: garmin_fitness.R noch nicht gelaufen oder bei Garmin nicht verfügbar).", peak$n_peak, peak$n_hr))
 message(sprintf("Letzte 14 Tage: %d Tage mit Erholungs-Index <= %.1f, ACWR aktuell %.2f",

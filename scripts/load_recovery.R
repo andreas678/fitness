@@ -57,18 +57,33 @@ athlete_profile <- function(rhr_ref, today = Sys.Date()) {
 #   n_artifact    Einheiten mit 30-s-Spitze über der Plausibilitätsgrenze (vermutlich Artefakt)
 #   obs_max       höchste 30-s-Spitze ohne Artefakte: HFmax kann nicht darunter liegen
 #   low           obs_max liegt mehr als tol bpm über HFmax (tol = übliche Messgenauigkeit des Handgelenk-Sensors)
-hr_peak_stats <- function(acts, hr, p, tol = 3) {
+# Sensor-Phasen: Mit strap_from (Datum) zählen nur Einheiten vom Typ strap_types ab diesem Tag (Brustgurt).
+#   Der Handgelenk-Sensor überschätzt Spitzen (Artefakte, Einrasten auf die Bewegung), der Brustgurt nicht; alle
+#   Zahlen oben beziehen sich dann nur auf Brustgurt-Einheiten (basis = "strap"). Die übrigen Einheiten melden
+#   n_wrist und obs_max_wrist (höchste 30-s-Spitze ohne Artefakte, nur zur Anzeige). Ohne strap_from oder ohne
+#   Brustgurt-Einheit zählen alle Einheiten (basis = "all"). Braucht dann die Spalten start und type_key.
+hr_peak_stats <- function(acts, hr, p, tol = 3, strap_from = NULL, strap_types = HR_STRAP_TYPES) {
   ceil <- if (is.null(p$hr_ceiling) || is.na(p$hr_ceiling)) Inf else p$hr_ceiling
   with_hr <- acts[!is.na(acts$max_hr), ]
-  out <- list(n_hr = nrow(with_hr), n_exceed_raw = sum(with_hr$max_hr > p$hrmax), n_peak = 0L,
-              n_exceed = NA_integer_, n_artifact = NA_integer_, obs_max = NA_real_, low = FALSE, ceiling = p$hr_ceiling)
+  wrist <- rep(FALSE, nrow(with_hr)); basis <- "all"
+  if (!is.null(strap_from) && !is.na(strap_from)) {
+    strap <- as.Date(with_hr$start) >= strap_from & with_hr$type_key %in% strap_types   # start ist Ortszeit, nur als UTC markiert
+    if (any(strap)) { basis <- "strap"; wrist <- !strap }
+  }
+  used <- with_hr[!wrist, ]
+  out <- list(n_hr = nrow(used), n_exceed_raw = sum(used$max_hr > p$hrmax), n_peak = 0L,
+              n_exceed = NA_integer_, n_artifact = NA_integer_, obs_max = NA_real_, low = FALSE, ceiling = p$hr_ceiling,
+              basis = basis, strap_from = if (basis == "strap") strap_from else NA, n_wrist = sum(wrist), obs_max_wrist = NA_real_)
   if (is.null(hr) || nrow(hr) == 0) return(out)
-  pk <- hr$hr_peak30[hr$activity_id %in% with_hr$activity_id]; pk <- pk[!is.na(pk)]
+  peaks <- function(d) { pk <- hr$hr_peak30[hr$activity_id %in% d$activity_id]; pk[!is.na(pk)] }
+  pk <- peaks(used)
   out$n_peak     <- length(pk)
   out$n_exceed   <- sum(pk > p$hrmax & pk <= ceil)
   out$n_artifact <- sum(pk > ceil)
   out$obs_max    <- if (any(pk <= ceil)) max(pk[pk <= ceil]) else NA_real_
   out$low        <- !is.na(out$obs_max) && out$obs_max > p$hrmax + tol
+  pw <- peaks(with_hr[wrist, ])
+  out$obs_max_wrist <- if (any(pw <= ceil)) max(pw[pw <= ceil]) else NA_real_
   out
 }
 

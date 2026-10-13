@@ -120,6 +120,14 @@ merge_rides <- function(acts, gap_min = RIDE_GAP_MIN, min_min = RIDE_MIN_MIN) {
   bind_rows(acts[!is_ride, ], rides) |> arrange(start)
 }
 
+# ---- Pulssensor: ab wann und wobei der Brustgurt getragen wurde -------------------------------------
+# Bis 17.09.2026 kam der Puls vom Handgelenk-Sensor, der bei Spitzen zu hoch misst (optische Artefakte). Ab
+# HR_STRAP_FROM trägt der Besitzer bei jeder HIIT-Einheit den Brustgurt, auch beim Indoor-Radtest vom 07.10.2026.
+# Die HFmax-Prüfung (hr_peak_stats) wertet deshalb nur noch diese Einheiten; andere Typen (Pendelfahrten, Atemübungen)
+# sind mit unbekanntem Sensor aufgezeichnet und zählen nicht. Neuer Typ mit Gurt: hier eintragen.
+HR_STRAP_FROM  <- as.Date("2026-09-18")
+HR_STRAP_TYPES <- c("hiit", "indoor_cycling")
+
 # ---- Tageswerte bereinigen (eine Stelle für R-Plots, Berechnungen und Dashboard) ------------
 # Schwellen: Nächte unter MIN_SLEEP_H gelten als "Uhr nicht getragen", Ruhepuls unter MIN_RHR als
 # Messartefakt, Tage unter MIN_STEPS ohne Schlafdaten als nicht getragen bzw. nicht synchronisiert.
