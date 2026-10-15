@@ -2,7 +2,7 @@
 # Aktivitätsnamen enthalten Orte, Tageswerte Schlaf, Puls und Körperdaten.
 data/*
 _outputs/*
-plans/*
+plans/
 
 # --- Zugangsdaten ---------------------------------------------------------------
 # GARMIN_EMAIL / GARMIN_PASSWORD stehen in ~/.Renviron, Tokens in ~/.garminconnect
